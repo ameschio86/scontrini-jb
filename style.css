@@ -426,6 +426,36 @@ body {
   to { opacity: 0; }
 }
 
+.camera-date-bar {
+  position: absolute;
+  bottom: 160px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 8px 16px;
+  border-radius: 999px;
+  z-index: 5;
+}
+
+.camera-date-bar label {
+  color: white;
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.camera-date-bar input[type="date"] {
+  border: none;
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 0.9rem;
+  font-family: inherit;
+  color-scheme: light;
+}
+
 .camera-controls {
   position: absolute;
   bottom: 0;

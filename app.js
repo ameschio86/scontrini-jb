@@ -44,6 +44,24 @@ function etichettaMeseFile(meseAnno) {
   return `${MESI_IT[mese - 1]}${anno}`;
 }
 
+function dataISOCorrente() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function parseDataISO(str) {
+  const [anno, mese, giorno] = str.split('-').map(Number);
+  return new Date(anno, mese - 1, giorno);
+}
+
+function etichettaDataScontrino(str) {
+  return parseDataISO(str).toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
+}
+
+function chiaveOrdinamento(ricevuta) {
+  return ricevuta.dataScontrino || ricevuta.timestamp.slice(0, 10);
+}
+
 /* =========================================================
    LAYER INDEXEDDB
    ========================================================= */
@@ -98,7 +116,7 @@ async function getRicevuteDelMese(meseAnno) {
   const { store } = await txStore(STORE_RICEVUTE, 'readonly');
   const idx = store.index('meseAnno');
   const result = await reqAsPromise(idx.getAll(meseAnno));
-  return result.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  return result.sort((a, b) => chiaveOrdinamento(a).localeCompare(chiaveOrdinamento(b)) || a.timestamp.localeCompare(b.timestamp));
 }
 
 async function getRicevuteDelMesePerCategoria(meseAnno, categoria) {
@@ -158,7 +176,8 @@ const stato = {
   meseAttivo: meseAnnoCorrente(),
   cameraCategoria: null,
   cameraStream: null,
-  overlayRicevutaId: null
+  overlayRicevutaId: null,
+  dataScontrino: dataISOCorrente()
 };
 
 /* =========================================================
@@ -196,6 +215,7 @@ const el = {
   cropCanvas: document.getElementById('crop-canvas'),
   cameraGuide: document.getElementById('camera-guide'),
   cameraFlash: document.getElementById('camera-flash'),
+  inputDataScontrino: document.getElementById('input-data-scontrino'),
   cameraCategoryLabel: document.getElementById('camera-category-label'),
   btnCameraShutter: document.getElementById('btn-camera-shutter'),
   btnCameraCancel: document.getElementById('btn-camera-cancel'),
@@ -279,7 +299,7 @@ async function aggiornaDashboard() {
 
 function renderGalleria(ricevute) {
   el.gallery.innerHTML = '';
-  const ordinate = [...ricevute].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  const ordinate = [...ricevute].sort((a, b) => chiaveOrdinamento(b).localeCompare(chiaveOrdinamento(a)) || b.timestamp.localeCompare(a.timestamp));
 
   el.galleryEmpty.classList.toggle('hidden', ordinate.length > 0);
 
@@ -310,10 +330,14 @@ function renderGalleria(ricevute) {
 function apriOverlay(ricevuta) {
   stato.overlayRicevutaId = ricevuta.id;
   el.overlayImage.src = URL.createObjectURL(ricevuta.immagine);
-  const data = new Date(ricevuta.timestamp);
-  el.overlayTimestamp.textContent = data.toLocaleString('it-IT', {
-    day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit'
+  const caricata = new Date(ricevuta.timestamp).toLocaleString('it-IT', {
+    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
   });
+  if (ricevuta.dataScontrino) {
+    el.overlayTimestamp.textContent = `Scontrino del ${etichettaDataScontrino(ricevuta.dataScontrino)} · caricato il ${caricata}`;
+  } else {
+    el.overlayTimestamp.textContent = `Caricato il ${caricata}`;
+  }
   el.photoOverlay.classList.remove('hidden');
 }
 
@@ -337,6 +361,7 @@ async function eliminaRicevutaCorrente() {
 async function apriFotocamera(categoria) {
   stato.cameraCategoria = categoria;
   el.cameraCategoryLabel.textContent = categoria === 'gasolio' ? '⛽ Gasolio' : '📷 Rimborso';
+  el.inputDataScontrino.value = stato.dataScontrino;
   el.viewCamera.classList.remove('hidden');
 
   try {
@@ -431,10 +456,14 @@ async function scattaFoto() {
 
   const blob = await comprimiImmagine(cropCanvas);
 
+  const dataScontrino = el.inputDataScontrino.value || dataISOCorrente();
+  stato.dataScontrino = dataScontrino;
+
   await salvaRicevuta({
     categoria: stato.cameraCategoria,
     timestamp: new Date().toISOString(),
     meseAnno: stato.meseAttivo,
+    dataScontrino,
     immagine: blob
   });
 
