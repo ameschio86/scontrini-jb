@@ -82,20 +82,40 @@
   <section id="view-camera" class="view hidden camera-view">
     <video id="camera-video" autoplay playsinline muted></video>
     <canvas id="camera-canvas" class="hidden"></canvas>
-    <canvas id="crop-canvas" class="hidden"></canvas>
-    <div id="camera-guide" class="camera-guide">
-      <span class="camera-guide-hint">Allinea lo scontrino qui dentro</span>
-    </div>
     <div id="camera-flash" class="camera-flash hidden"></div>
-    <div class="camera-date-bar">
-      <label for="input-data-scontrino">Data scontrino</label>
-      <input type="date" id="input-data-scontrino">
-    </div>
     <div class="camera-controls">
       <button id="btn-camera-cancel" class="btn-camera-cancel" aria-label="Annulla">✕</button>
       <button id="btn-camera-shutter" class="btn-camera-shutter" aria-label="Scatta"></button>
       <span class="camera-category-label" id="camera-category-label"></span>
     </div>
+  </section>
+
+  <!-- ===================== VISTA RIFINITURA (angoli + data) ===================== -->
+  <section id="view-rifinisci" class="view hidden rifinisci-view">
+    <div id="rifinisci-stage" class="rifinisci-stage">
+      <img id="rifinisci-img" alt="Foto scattata">
+      <svg id="rifinisci-svg" class="rifinisci-svg">
+        <polygon id="rifinisci-poly" class="rifinisci-poly"></polygon>
+      </svg>
+      <div class="rifinisci-handle" id="handle-0" data-idx="0"></div>
+      <div class="rifinisci-handle" id="handle-1" data-idx="1"></div>
+      <div class="rifinisci-handle" id="handle-2" data-idx="2"></div>
+      <div class="rifinisci-handle" id="handle-3" data-idx="3"></div>
+      <p class="rifinisci-hint">Trascina i 4 angoli sui bordi dello scontrino</p>
+      <div id="rifinisci-flash" class="camera-flash hidden"></div>
+    </div>
+
+    <div class="rifinisci-date-bar">
+      <label for="input-data-rifinisci">Data scontrino</label>
+      <input type="date" id="input-data-rifinisci">
+    </div>
+
+    <div class="rifinisci-controls">
+      <button id="btn-rifinisci-annulla" class="btn-secondary">Annulla</button>
+      <button id="btn-rifinisci-conferma" class="btn-primary">Conferma</button>
+    </div>
+
+    <div id="rifinisci-loading" class="rifinisci-loading hidden">Elaborazione…</div>
   </section>
 
 </div>

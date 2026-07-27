@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'scontrini-jb-cache-v3';
+const CACHE_NAME = 'scontrini-jb-cache-v4';
 const ASSETS = [
   './',
   './index.html',

@@ -177,7 +177,10 @@ const stato = {
   cameraCategoria: null,
   cameraStream: null,
   overlayRicevutaId: null,
-  dataScontrino: dataISOCorrente()
+  dataScontrino: dataISOCorrente(),
+  fotoGrezza: null,
+  angoli: null,
+  angoloTrascinato: null
 };
 
 /* =========================================================
@@ -212,13 +215,26 @@ const el = {
 
   cameraVideo: document.getElementById('camera-video'),
   cameraCanvas: document.getElementById('camera-canvas'),
-  cropCanvas: document.getElementById('crop-canvas'),
-  cameraGuide: document.getElementById('camera-guide'),
   cameraFlash: document.getElementById('camera-flash'),
-  inputDataScontrino: document.getElementById('input-data-scontrino'),
   cameraCategoryLabel: document.getElementById('camera-category-label'),
   btnCameraShutter: document.getElementById('btn-camera-shutter'),
   btnCameraCancel: document.getElementById('btn-camera-cancel'),
+
+  viewRifinisci: document.getElementById('view-rifinisci'),
+  rifinisciStage: document.getElementById('rifinisci-stage'),
+  rifinisciImg: document.getElementById('rifinisci-img'),
+  rifinisciPoly: document.getElementById('rifinisci-poly'),
+  rifinisciHandles: [
+    document.getElementById('handle-0'),
+    document.getElementById('handle-1'),
+    document.getElementById('handle-2'),
+    document.getElementById('handle-3')
+  ],
+  rifinisciFlash: document.getElementById('rifinisci-flash'),
+  inputDataRifinisci: document.getElementById('input-data-rifinisci'),
+  btnRifinisciAnnulla: document.getElementById('btn-rifinisci-annulla'),
+  btnRifinisciConferma: document.getElementById('btn-rifinisci-conferma'),
+  rifinisciLoading: document.getElementById('rifinisci-loading'),
 
   photoOverlay: document.getElementById('photo-overlay'),
   overlayImage: document.getElementById('overlay-image'),
@@ -361,7 +377,6 @@ async function eliminaRicevutaCorrente() {
 async function apriFotocamera(categoria) {
   stato.cameraCategoria = categoria;
   el.cameraCategoryLabel.textContent = categoria === 'gasolio' ? '⛽ Gasolio' : '📷 Rimborso';
-  el.inputDataScontrino.value = stato.dataScontrino;
   el.viewCamera.classList.remove('hidden');
 
   try {
@@ -407,36 +422,7 @@ function comprimiImmagine(sourceCanvas) {
   });
 }
 
-function calcolaRettangoloRitaglio() {
-  const video = el.cameraVideo;
-  const videoRect = video.getBoundingClientRect();
-  const guideRect = el.cameraGuide.getBoundingClientRect();
-
-  const vw = video.videoWidth;
-  const vh = video.videoHeight;
-  const scala = Math.max(videoRect.width / vw, videoRect.height / vh);
-  const displayW = vw * scala;
-  const displayH = vh * scala;
-  const offsetX = (videoRect.width - displayW) / 2;
-  const offsetY = (videoRect.height - displayH) / 2;
-
-  const guideX = guideRect.left - videoRect.left;
-  const guideY = guideRect.top - videoRect.top;
-
-  const sx = (guideX - offsetX) / scala;
-  const sy = (guideY - offsetY) / scala;
-  const sw = guideRect.width / scala;
-  const sh = guideRect.height / scala;
-
-  return {
-    x: Math.max(0, Math.round(sx)),
-    y: Math.max(0, Math.round(sy)),
-    w: Math.min(vw, Math.round(sw)),
-    h: Math.min(vh, Math.round(sh))
-  };
-}
-
-async function scattaFoto() {
+function scattaFoto() {
   const video = el.cameraVideo;
   const canvas = el.cameraCanvas;
   canvas.width = video.videoWidth;
@@ -444,41 +430,283 @@ async function scattaFoto() {
   const ctx = canvas.getContext('2d');
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-  const ritaglio = calcolaRettangoloRitaglio();
-  const cropCanvas = el.cropCanvas;
-  cropCanvas.width = ritaglio.w;
-  cropCanvas.height = ritaglio.h;
-  cropCanvas.getContext('2d').drawImage(
-    canvas,
-    ritaglio.x, ritaglio.y, ritaglio.w, ritaglio.h,
-    0, 0, ritaglio.w, ritaglio.h
-  );
+  const grezza = document.createElement('canvas');
+  grezza.width = canvas.width;
+  grezza.height = canvas.height;
+  grezza.getContext('2d').drawImage(canvas, 0, 0);
+  stato.fotoGrezza = grezza;
 
-  const blob = await comprimiImmagine(cropCanvas);
-
-  const dataScontrino = el.inputDataScontrino.value || dataISOCorrente();
-  stato.dataScontrino = dataScontrino;
-
-  await salvaRicevuta({
-    categoria: stato.cameraCategoria,
-    timestamp: new Date().toISOString(),
-    meseAnno: stato.meseAttivo,
-    dataScontrino,
-    immagine: blob
-  });
-
-  mostraFlash();
-  if (navigator.vibrate) navigator.vibrate(80);
+  if (navigator.vibrate) navigator.vibrate(60);
 
   chiudiFotocamera();
-  await aggiornaDashboard();
+  apriRifinisci();
 }
 
-function mostraFlash() {
-  el.cameraFlash.classList.remove('hidden');
-  void el.cameraFlash.offsetWidth;
-  el.cameraFlash.classList.remove('hidden');
-  setTimeout(() => el.cameraFlash.classList.add('hidden'), 350);
+function mostraFlash(elemento) {
+  return new Promise((resolve) => {
+    elemento.classList.remove('hidden');
+    void elemento.offsetWidth;
+    elemento.classList.remove('hidden');
+    setTimeout(() => {
+      elemento.classList.add('hidden');
+      resolve();
+    }, 350);
+  });
+}
+
+/* =========================================================
+   RIFINITURA: SELEZIONE ANGOLI + CORREZIONE PROSPETTICA
+   ========================================================= */
+
+function apriRifinisci() {
+  const url = URL.createObjectURL(dataURLtoBlobSync(stato.fotoGrezza));
+  el.rifinisciImg.onload = () => {
+    URL.revokeObjectURL(url);
+    inizializzaAngoliDefault();
+    renderPoligono();
+  };
+  el.rifinisciImg.src = url;
+
+  el.inputDataRifinisci.value = stato.dataScontrino;
+  el.viewRifinisci.classList.remove('hidden');
+}
+
+function dataURLtoBlobSync(canvas) {
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+  const [meta, base64] = dataUrl.split(',');
+  const mime = meta.match(/:(.*?);/)[1];
+  const bin = atob(base64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
+
+function inizializzaAngoliDefault() {
+  const rect = el.rifinisciImg.getBoundingClientRect();
+  const stageRect = el.rifinisciStage.getBoundingClientRect();
+  const left = rect.left - stageRect.left;
+  const top = rect.top - stageRect.top;
+  const margineX = rect.width * 0.1;
+  const margineY = rect.height * 0.1;
+
+  stato.angoli = [
+    { x: left + margineX, y: top + margineY },
+    { x: left + rect.width - margineX, y: top + margineY },
+    { x: left + rect.width - margineX, y: top + rect.height - margineY },
+    { x: left + margineX, y: top + rect.height - margineY }
+  ];
+}
+
+function renderPoligono() {
+  const punti = stato.angoli.map(p => `${p.x},${p.y}`).join(' ');
+  el.rifinisciPoly.setAttribute('points', punti);
+  stato.angoli.forEach((p, i) => {
+    el.rifinisciHandles[i].style.left = `${p.x}px`;
+    el.rifinisciHandles[i].style.top = `${p.y}px`;
+  });
+}
+
+function limitaAlloStage(x, y) {
+  const stageRect = el.rifinisciStage.getBoundingClientRect();
+  return {
+    x: Math.max(0, Math.min(stageRect.width, x)),
+    y: Math.max(0, Math.min(stageRect.height, y))
+  };
+}
+
+function onHandlePointerDown(e) {
+  const idx = Number(e.currentTarget.dataset.idx);
+  stato.angoloTrascinato = idx;
+  e.currentTarget.setPointerCapture(e.pointerId);
+  e.preventDefault();
+}
+
+function onStagePointerMove(e) {
+  if (stato.angoloTrascinato === null) return;
+  const stageRect = el.rifinisciStage.getBoundingClientRect();
+  const punto = limitaAlloStage(e.clientX - stageRect.left, e.clientY - stageRect.top);
+  stato.angoli[stato.angoloTrascinato] = punto;
+  renderPoligono();
+  e.preventDefault();
+}
+
+function onStagePointerUp() {
+  stato.angoloTrascinato = null;
+}
+
+function chiudiRifinisci() {
+  el.viewRifinisci.classList.add('hidden');
+  stato.fotoGrezza = null;
+  stato.angoli = null;
+  stato.angoloTrascinato = null;
+}
+
+function annullaRifinisci() {
+  chiudiRifinisci();
+}
+
+function mappaAngoliSuSorgente() {
+  const imgRect = el.rifinisciImg.getBoundingClientRect();
+  const stageRect = el.rifinisciStage.getBoundingClientRect();
+  const natW = el.rifinisciImg.naturalWidth;
+  const natH = el.rifinisciImg.naturalHeight;
+  const scala = Math.min(imgRect.width / natW, imgRect.height / natH);
+
+  const imgLeft = imgRect.left - stageRect.left;
+  const imgTop = imgRect.top - stageRect.top;
+
+  return stato.angoli.map(p => ({
+    x: (p.x - imgLeft) / scala,
+    y: (p.y - imgTop) / scala
+  }));
+}
+
+function invertiMat3(m) {
+  const a = m[0], b = m[1], c = m[2];
+  const d = m[3], e = m[4], f = m[5];
+  const g = m[6], h = m[7], i = m[8];
+
+  const A = e * i - f * h;
+  const B = f * g - d * i;
+  const C = d * h - e * g;
+  const Dd = c * h - b * i;
+  const E = a * i - c * g;
+  const F = b * g - a * h;
+  const G = b * f - c * e;
+  const H = c * d - a * f;
+  const I = a * e - b * d;
+
+  const det = a * A + b * B + c * C;
+  const invDet = 1 / det;
+
+  return [
+    A * invDet, Dd * invDet, G * invDet,
+    B * invDet, E * invDet, H * invDet,
+    C * invDet, F * invDet, I * invDet
+  ];
+}
+
+function moltiplicaMat3(A, B) {
+  const r = new Array(9).fill(0);
+  for (let i = 0; i < 3; i++) {
+    for (let j = 0; j < 3; j++) {
+      let s = 0;
+      for (let k = 0; k < 3; k++) s += A[i * 3 + k] * B[k * 3 + j];
+      r[i * 3 + j] = s;
+    }
+  }
+  return r;
+}
+
+function affineDaTriangoli(src, dst) {
+  const P = [src[0].x, src[1].x, src[2].x, src[0].y, src[1].y, src[2].y, 1, 1, 1];
+  const Q = [dst[0].x, dst[1].x, dst[2].x, dst[0].y, dst[1].y, dst[2].y, 1, 1, 1];
+  const M = moltiplicaMat3(Q, invertiMat3(P));
+  return { a: M[0], c: M[1], e: M[2], b: M[3], d: M[4], f: M[5] };
+}
+
+function disegnaTriangoloWarp(ctx, sorgente, src3, dst3) {
+  const minX = Math.max(0, Math.floor(Math.min(src3[0].x, src3[1].x, src3[2].x)) - 1);
+  const minY = Math.max(0, Math.floor(Math.min(src3[0].y, src3[1].y, src3[2].y)) - 1);
+  const maxX = Math.min(sorgente.width, Math.ceil(Math.max(src3[0].x, src3[1].x, src3[2].x)) + 1);
+  const maxY = Math.min(sorgente.height, Math.ceil(Math.max(src3[0].y, src3[1].y, src3[2].y)) + 1);
+  const w = Math.max(1, maxX - minX);
+  const h = Math.max(1, maxY - minY);
+
+  const srcRel = src3.map(p => ({ x: p.x - minX, y: p.y - minY }));
+  const { a, b, c, d, e, f } = affineDaTriangoli(srcRel, dst3);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(dst3[0].x, dst3[0].y);
+  ctx.lineTo(dst3[1].x, dst3[1].y);
+  ctx.lineTo(dst3[2].x, dst3[2].y);
+  ctx.closePath();
+  ctx.clip();
+  ctx.transform(a, b, c, d, e, f);
+  ctx.drawImage(sorgente, minX, minY, w, h, 0, 0, w, h);
+  ctx.restore();
+}
+
+function correggiProspettiva(sorgente, angoliSorgente, largOutput, altOutput) {
+  const outCanvas = document.createElement('canvas');
+  outCanvas.width = largOutput;
+  outCanvas.height = altOutput;
+  const ctx = outCanvas.getContext('2d');
+
+  const COLONNE = 18, RIGHE = 24;
+  const [tl, tr, br, bl] = angoliSorgente;
+
+  function puntoSorgente(u, v) {
+    const top = { x: tl.x + (tr.x - tl.x) * u, y: tl.y + (tr.y - tl.y) * u };
+    const bottom = { x: bl.x + (br.x - bl.x) * u, y: bl.y + (br.y - bl.y) * u };
+    return { x: top.x + (bottom.x - top.x) * v, y: top.y + (bottom.y - top.y) * v };
+  }
+
+  for (let riga = 0; riga < RIGHE; riga++) {
+    for (let col = 0; col < COLONNE; col++) {
+      const u0 = col / COLONNE, u1 = (col + 1) / COLONNE;
+      const v0 = riga / RIGHE, v1 = (riga + 1) / RIGHE;
+
+      const sTL = puntoSorgente(u0, v0);
+      const sTR = puntoSorgente(u1, v0);
+      const sBR = puntoSorgente(u1, v1);
+      const sBL = puntoSorgente(u0, v1);
+
+      const dTL = { x: u0 * largOutput, y: v0 * altOutput };
+      const dTR = { x: u1 * largOutput, y: v0 * altOutput };
+      const dBR = { x: u1 * largOutput, y: v1 * altOutput };
+      const dBL = { x: u0 * largOutput, y: v1 * altOutput };
+
+      disegnaTriangoloWarp(ctx, sorgente, [sTL, sTR, sBR], [dTL, dTR, dBR]);
+      disegnaTriangoloWarp(ctx, sorgente, [sTL, sBR, sBL], [dTL, dBR, dBL]);
+    }
+  }
+
+  return outCanvas;
+}
+
+function lunghezza(p1, p2) {
+  return Math.hypot(p2.x - p1.x, p2.y - p1.y);
+}
+
+async function confermaRifinisci() {
+  el.rifinisciLoading.classList.remove('hidden');
+
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  try {
+    const angoliSorgente = mappaAngoliSuSorgente();
+    const [tl, tr, br, bl] = angoliSorgente;
+
+    const largOutput = Math.round((lunghezza(tl, tr) + lunghezza(bl, br)) / 2);
+    const altOutput = Math.round((lunghezza(tl, bl) + lunghezza(tr, br)) / 2);
+
+    const warpCanvas = correggiProspettiva(
+      stato.fotoGrezza,
+      angoliSorgente,
+      Math.max(200, largOutput),
+      Math.max(200, altOutput)
+    );
+
+    const blob = await comprimiImmagine(warpCanvas);
+    const dataScontrino = el.inputDataRifinisci.value || dataISOCorrente();
+    stato.dataScontrino = dataScontrino;
+
+    await salvaRicevuta({
+      categoria: stato.cameraCategoria,
+      timestamp: new Date().toISOString(),
+      meseAnno: stato.meseAttivo,
+      dataScontrino,
+      immagine: blob
+    });
+
+    await mostraFlash(el.rifinisciFlash);
+    chiudiRifinisci();
+    await aggiornaDashboard();
+  } finally {
+    el.rifinisciLoading.classList.add('hidden');
+  }
 }
 
 /* =========================================================
@@ -629,6 +857,13 @@ el.btnCaptureGenerico.addEventListener('click', () => apriFotocamera('generico')
 el.btnCaptureGasolio.addEventListener('click', () => apriFotocamera('gasolio'));
 el.btnCameraShutter.addEventListener('click', scattaFoto);
 el.btnCameraCancel.addEventListener('click', chiudiFotocamera);
+
+el.rifinisciHandles.forEach(handle => handle.addEventListener('pointerdown', onHandlePointerDown));
+el.rifinisciStage.addEventListener('pointermove', onStagePointerMove);
+el.rifinisciStage.addEventListener('pointerup', onStagePointerUp);
+el.rifinisciStage.addEventListener('pointercancel', onStagePointerUp);
+el.btnRifinisciAnnulla.addEventListener('click', annullaRifinisci);
+el.btnRifinisciConferma.addEventListener('click', confermaRifinisci);
 
 el.btnReopenMonth.addEventListener('click', riapriMese);
 el.btnCloseMonth.addEventListener('click', chiudiMese);
