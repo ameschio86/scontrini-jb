@@ -752,7 +752,12 @@ function caricaImmagine(dataUrl) {
 }
 
 async function esportaPdf(categoria, meseAnno) {
-  const ricevute = await getRicevuteDelMesePerCategoria(meseAnno, categoria);
+  // Il rimborso ("generico") include anche gli scontrini gasolio: un gasolio
+  // e' comunque un rimborso, oltre a comparire nel suo export specifico.
+  const ricevute = categoria === 'generico'
+    ? await getRicevuteDelMese(meseAnno)
+    : await getRicevuteDelMesePerCategoria(meseAnno, categoria);
+
   if (ricevute.length === 0) {
     alert(`Nessuna ricevuta ${categoria === 'gasolio' ? 'gasolio' : 'rimborso'} da esportare per ${etichettaMese(meseAnno)}.`);
     return;
