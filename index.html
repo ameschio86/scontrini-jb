@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0080FF">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Scontrini JB">
+<title>JB Living & Building — Scontrini</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ===================== VISTA DASHBOARD ===================== -->
+  <section id="view-dashboard" class="view">
+
+    <header class="app-header">
+      <img src="icons/icon-512.png" alt="Logo JB Living & Building" class="logo">
+      <h1 class="app-title">Scontrini</h1>
+    </header>
+
+    <div class="month-selector">
+      <button id="btn-prev-month" class="btn-arrow" aria-label="Mese precedente">◀</button>
+      <div class="month-label-wrap">
+        <span id="month-label" class="month-label">—</span>
+        <span id="month-closed-badge" class="badge-closed hidden">✓ Mese chiuso</span>
+      </div>
+      <button id="btn-next-month" class="btn-arrow" aria-label="Mese successivo">▶</button>
+    </div>
+
+    <div class="counters">
+      <span id="counter-text">0 rimborsi · 0 gasolio</span>
+    </div>
+
+    <div class="capture-buttons">
+      <button id="btn-capture-generico" class="btn-capture btn-generico">
+        <span class="icon">📷</span>
+        <span>Scatta foto — Rimborso</span>
+      </button>
+      <button id="btn-capture-gasolio" class="btn-capture btn-gasolio">
+        <span class="icon">⛽</span>
+        <span>Scatta foto — Gasolio</span>
+      </button>
+    </div>
+
+    <button id="btn-reopen-month" class="btn-secondary hidden">🔓 Riapri mese</button>
+
+    <div id="gallery" class="gallery"></div>
+    <p id="gallery-empty" class="gallery-empty hidden">Nessuna ricevuta per questo mese.</p>
+
+    <div class="export-buttons">
+      <button id="btn-export-generico" class="btn-export">Esporta ricevute mese attivo</button>
+      <button id="btn-export-gasolio" class="btn-export">Esporta ricevute gasolio mese attivo</button>
+    </div>
+
+    <button id="btn-close-month" class="btn-close-month">Chiudi mese</button>
+
+    <nav class="secondary-nav">
+      <a href="#" id="link-archive">Mesi precedenti</a>
+    </nav>
+
+  </section>
+
+  <!-- ===================== VISTA ARCHIVIO ===================== -->
+  <section id="view-archive" class="view hidden">
+    <header class="app-header">
+      <button id="btn-archive-back" class="btn-back" aria-label="Torna alla dashboard">←</button>
+      <h1 class="app-title">Mesi precedenti</h1>
+    </header>
+    <div id="archive-list" class="archive-list"></div>
+  </section>
+
+  <!-- ===================== VISTA FOTOCAMERA ===================== -->
+  <section id="view-camera" class="view hidden camera-view">
+    <video id="camera-video" autoplay playsinline muted></video>
+    <canvas id="camera-canvas" class="hidden"></canvas>
+    <div id="camera-flash" class="camera-flash hidden"></div>
+    <div class="camera-controls">
+      <button id="btn-camera-cancel" class="btn-camera-cancel" aria-label="Annulla">✕</button>
+      <button id="btn-camera-shutter" class="btn-camera-shutter" aria-label="Scatta"></button>
+      <span class="camera-category-label" id="camera-category-label"></span>
+    </div>
+  </section>
+
+</div>
+
+<!-- ===================== OVERLAY ANTEPRIMA FOTO ===================== -->
+<div id="photo-overlay" class="photo-overlay hidden">
+  <button id="btn-overlay-close" class="overlay-close" aria-label="Chiudi">✕</button>
+  <img id="overlay-image" src="" alt="Ricevuta ingrandita">
+  <div class="overlay-info">
+    <span id="overlay-timestamp"></span>
+    <button id="btn-overlay-delete" class="btn-overlay-delete">🗑 Elimina</button>
+  </div>
+</div>
+
+<!-- ===================== TOAST / CONFERME ===================== -->
+<div id="confirm-dialog" class="confirm-dialog hidden">
+  <div class="confirm-box">
+    <p id="confirm-message"></p>
+    <div class="confirm-buttons">
+      <button id="confirm-cancel" class="btn-secondary">Annulla</button>
+      <button id="confirm-ok" class="btn-primary">Conferma</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
