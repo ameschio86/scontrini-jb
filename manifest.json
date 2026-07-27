@@ -1,6 +1,6 @@
 {
-  "name": "JB Living & Building — Scontrini",
-  "short_name": "Scontrini JB",
+  "name": "L&B Scontrini",
+  "short_name": "Scontrini L&B",
   "description": "Archiviazione fotografica di scontrini di lavoro con export mensile in PDF",
   "start_url": "./index.html",
   "scope": "./",
