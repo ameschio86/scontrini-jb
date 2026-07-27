@@ -48,25 +48,38 @@ body {
 /* ---------- Header ---------- */
 .app-header {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 12px;
-  padding: 8px 0 16px;
+  gap: 6px;
+  padding: 16px 0 18px;
   border-bottom: 1px solid var(--border-light);
   margin-bottom: 16px;
+  position: relative;
 }
 
 .logo {
-  height: 44px;
-  width: 44px;
+  height: 110px;
+  width: 110px;
   object-fit: contain;
-  border-radius: 8px;
 }
 
 .app-title {
-  font-size: 1.3rem;
+  font-size: 1.1rem;
   font-weight: 700;
   margin: 0;
   color: var(--primary-blue-dark);
+  letter-spacing: 0.02em;
+}
+
+#view-archive .app-header {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0 16px;
+}
+
+#view-archive .app-header .app-title {
+  font-size: 1.3rem;
 }
 
 .btn-back {
@@ -371,6 +384,32 @@ body {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.camera-guide {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 72%;
+  height: 76%;
+  max-width: 480px;
+  border: 3px dashed rgba(255, 255, 255, 0.9);
+  border-radius: 14px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+.camera-guide-hint {
+  position: absolute;
+  top: -34px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: white;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.7);
 }
 
 .camera-flash {

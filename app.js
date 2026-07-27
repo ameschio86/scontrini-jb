@@ -8,8 +8,8 @@ const DB_NAME = 'ScontriniDB';
 const DB_VERSION = 1;
 const STORE_RICEVUTE = 'ricevute';
 const STORE_STATO_MESI = 'statoMesi';
-const MAX_LATO_LUNGO = 1600;
-const JPEG_QUALITY = 0.7;
+const MAX_LATO_LUNGO = 2200;
+const JPEG_QUALITY = 0.85;
 
 const MESI_IT = [
   'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
@@ -193,6 +193,8 @@ const el = {
 
   cameraVideo: document.getElementById('camera-video'),
   cameraCanvas: document.getElementById('camera-canvas'),
+  cropCanvas: document.getElementById('crop-canvas'),
+  cameraGuide: document.getElementById('camera-guide'),
   cameraFlash: document.getElementById('camera-flash'),
   cameraCategoryLabel: document.getElementById('camera-category-label'),
   btnCameraShutter: document.getElementById('btn-camera-shutter'),
@@ -339,7 +341,11 @@ async function apriFotocamera(categoria) {
 
   try {
     stato.cameraStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: 'environment' } },
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 2560 },
+        height: { ideal: 1440 }
+      },
       audio: false
     });
     el.cameraVideo.srcObject = stato.cameraStream;
@@ -376,6 +382,35 @@ function comprimiImmagine(sourceCanvas) {
   });
 }
 
+function calcolaRettangoloRitaglio() {
+  const video = el.cameraVideo;
+  const videoRect = video.getBoundingClientRect();
+  const guideRect = el.cameraGuide.getBoundingClientRect();
+
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  const scala = Math.max(videoRect.width / vw, videoRect.height / vh);
+  const displayW = vw * scala;
+  const displayH = vh * scala;
+  const offsetX = (videoRect.width - displayW) / 2;
+  const offsetY = (videoRect.height - displayH) / 2;
+
+  const guideX = guideRect.left - videoRect.left;
+  const guideY = guideRect.top - videoRect.top;
+
+  const sx = (guideX - offsetX) / scala;
+  const sy = (guideY - offsetY) / scala;
+  const sw = guideRect.width / scala;
+  const sh = guideRect.height / scala;
+
+  return {
+    x: Math.max(0, Math.round(sx)),
+    y: Math.max(0, Math.round(sy)),
+    w: Math.min(vw, Math.round(sw)),
+    h: Math.min(vh, Math.round(sh))
+  };
+}
+
 async function scattaFoto() {
   const video = el.cameraVideo;
   const canvas = el.cameraCanvas;
@@ -384,7 +419,17 @@ async function scattaFoto() {
   const ctx = canvas.getContext('2d');
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-  const blob = await comprimiImmagine(canvas);
+  const ritaglio = calcolaRettangoloRitaglio();
+  const cropCanvas = el.cropCanvas;
+  cropCanvas.width = ritaglio.w;
+  cropCanvas.height = ritaglio.h;
+  cropCanvas.getContext('2d').drawImage(
+    canvas,
+    ritaglio.x, ritaglio.y, ritaglio.w, ritaglio.h,
+    0, 0, ritaglio.w, ritaglio.h
+  );
+
+  const blob = await comprimiImmagine(cropCanvas);
 
   await salvaRicevuta({
     categoria: stato.cameraCategoria,

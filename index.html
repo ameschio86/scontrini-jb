@@ -26,6 +26,7 @@
       <h1 class="app-title">Scontrini</h1>
     </header>
 
+
     <div class="month-selector">
       <button id="btn-prev-month" class="btn-arrow" aria-label="Mese precedente">◀</button>
       <div class="month-label-wrap">
@@ -81,6 +82,10 @@
   <section id="view-camera" class="view hidden camera-view">
     <video id="camera-video" autoplay playsinline muted></video>
     <canvas id="camera-canvas" class="hidden"></canvas>
+    <canvas id="crop-canvas" class="hidden"></canvas>
+    <div id="camera-guide" class="camera-guide">
+      <span class="camera-guide-hint">Allinea lo scontrino qui dentro</span>
+    </div>
     <div id="camera-flash" class="camera-flash hidden"></div>
     <div class="camera-controls">
       <button id="btn-camera-cancel" class="btn-camera-cancel" aria-label="Annulla">✕</button>
