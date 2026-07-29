@@ -91,12 +91,6 @@ body {
   padding: 4px 8px;
 }
 
-#view-dashboard .app-header .btn-back {
-  position: absolute;
-  left: 0;
-  top: 16px;
-}
-
 /* ---------- Hub ---------- */
 .hub-view {
   position: relative;
