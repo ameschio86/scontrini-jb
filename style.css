@@ -120,31 +120,25 @@ body {
 
 .hub-watermark {
   position: absolute;
-  top: 0;
+  top: 10px;
   left: 50%;
   transform: translateX(-50%);
-  width: 420px;
-  max-width: 90vw;
-  height: 420px;
   z-index: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
   pointer-events: none;
 }
 
 .hub-watermark img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
+  display: block;
+  width: 480px;
+  max-width: 95vw;
+  height: auto;
   opacity: 0.2;
   filter: blur(4px);
 }
 
 .hub-header .logo {
-  height: 330px;
   width: 330px;
+  height: auto;
 }
 
 .hub-swoosh {
