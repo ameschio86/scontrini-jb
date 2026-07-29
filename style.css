@@ -104,6 +104,29 @@ body {
   background-size: 18px 18px;
 }
 
+.hub-watermark {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.hub-watermark img {
+  width: 135%;
+  max-width: none;
+  opacity: 0.1;
+  filter: blur(4px);
+}
+
+.hub-header .logo {
+  height: 330px;
+  width: 330px;
+}
+
 .hub-swoosh {
   position: absolute;
   top: 0;
@@ -128,6 +151,8 @@ body {
 }
 
 .dipendente-field {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -153,6 +178,8 @@ body {
 }
 
 .hub-cards {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   gap: 14px;
