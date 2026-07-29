@@ -5,9 +5,11 @@
    ========================================================= */
 
 const DB_NAME = 'ScontriniDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_RICEVUTE = 'ricevute';
 const STORE_STATO_MESI = 'statoMesi';
+const STORE_SPESE = 'spese';
+const STORE_STATO_MESI_RIMBORSO = 'statoMesiRimborso';
 const MAX_LATO_LUNGO = 2200;
 const JPEG_QUALITY = 0.85;
 
@@ -99,6 +101,14 @@ function apriDB() {
       if (!db.objectStoreNames.contains(STORE_STATO_MESI)) {
         db.createObjectStore(STORE_STATO_MESI, { keyPath: 'meseAnno' });
       }
+      if (!db.objectStoreNames.contains(STORE_SPESE)) {
+        const storeSpese = db.createObjectStore(STORE_SPESE, { keyPath: 'id', autoIncrement: true });
+        storeSpese.createIndex('meseAnno', 'meseAnno', { unique: false });
+        storeSpese.createIndex('esercente', 'esercente', { unique: false });
+      }
+      if (!db.objectStoreNames.contains(STORE_STATO_MESI_RIMBORSO)) {
+        db.createObjectStore(STORE_STATO_MESI_RIMBORSO, { keyPath: 'meseAnno' });
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -141,6 +151,36 @@ async function getRicevuteDelMesePerCategoria(meseAnno, categoria) {
   return tutte.filter(r => r.categoria === categoria);
 }
 
+async function salvaSpesa(spesa) {
+  const { store } = await txStore(STORE_SPESE, 'readwrite');
+  return reqAsPromise(store.add(spesa));
+}
+
+async function eliminaSpesa(id) {
+  const { store } = await txStore(STORE_SPESE, 'readwrite');
+  return reqAsPromise(store.delete(id));
+}
+
+async function getSpeseDelMese(meseAnno) {
+  const { store } = await txStore(STORE_SPESE, 'readonly');
+  const idx = store.index('meseAnno');
+  const result = await reqAsPromise(idx.getAll(meseAnno));
+  return result.sort((a, b) => a.data.localeCompare(b.data) || a.id - b.id);
+}
+
+async function getTutteLeSpese() {
+  const { store } = await txStore(STORE_SPESE, 'readonly');
+  return reqAsPromise(store.getAll());
+}
+
+async function getUltimaSpesaPerEsercente(esercente) {
+  const { store } = await txStore(STORE_SPESE, 'readonly');
+  const idx = store.index('esercente');
+  const result = await reqAsPromise(idx.getAll(esercente));
+  if (result.length === 0) return null;
+  return result.sort((a, b) => b.id - a.id)[0];
+}
+
 async function getStatoMese(meseAnno) {
   const { store } = await txStore(STORE_STATO_MESI, 'readonly');
   const result = await reqAsPromise(store.get(meseAnno));
@@ -151,6 +191,39 @@ async function setStatoMese(meseAnno, chiuso) {
   const { store } = await txStore(STORE_STATO_MESI, 'readwrite');
   const record = { meseAnno, chiuso, dataChiusura: chiuso ? new Date().toISOString() : null };
   return reqAsPromise(store.put(record));
+}
+
+async function getStatoMeseRimborso(meseAnno) {
+  const { store } = await txStore(STORE_STATO_MESI_RIMBORSO, 'readonly');
+  const result = await reqAsPromise(store.get(meseAnno));
+  return result || { meseAnno, chiuso: false, dataChiusura: null };
+}
+
+async function setStatoMeseRimborso(meseAnno, chiuso) {
+  const { store } = await txStore(STORE_STATO_MESI_RIMBORSO, 'readwrite');
+  const record = { meseAnno, chiuso, dataChiusura: chiuso ? new Date().toISOString() : null };
+  return reqAsPromise(store.put(record));
+}
+
+async function determinaMeseAttivoRimborsoIniziale() {
+  const correnteMese = meseAnnoCorrente();
+  const [tutteSpese, statiDb] = await Promise.all([
+    getTutteLeSpese(),
+    (async () => {
+      const { store } = await txStore(STORE_STATO_MESI_RIMBORSO, 'readonly');
+      return reqAsPromise(store.getAll());
+    })()
+  ]);
+
+  const conteggi = new Map();
+  for (const s of tutteSpese) conteggi.set(s.meseAnno, (conteggi.get(s.meseAnno) || 0) + 1);
+  const statiMap = new Map(statiDb.map(s => [s.meseAnno, s]));
+
+  const precedentiAperti = [...conteggi.keys()]
+    .filter(m => m < correnteMese && !statiMap.get(m)?.chiuso && conteggi.get(m) > 0)
+    .sort();
+
+  return precedentiAperti.length > 0 ? precedentiAperti[0] : correnteMese;
 }
 
 async function getTuttiIMesi() {
@@ -197,7 +270,8 @@ const stato = {
   dataScontrino: dataISOCorrente(),
   fotoGrezza: null,
   angoli: null,
-  angoloTrascinato: null
+  angoloTrascinato: null,
+  meseAttivoRimborso: meseAnnoCorrente()
 };
 
 /* =========================================================
@@ -213,6 +287,32 @@ const el = {
   cardRimborso: document.getElementById('card-rimborso'),
   cardAttivita: document.getElementById('card-attivita'),
   btnTornaHub: document.getElementById('btn-torna-hub'),
+
+  viewRimborso: document.getElementById('view-rimborso'),
+  btnTornaHubRimborso: document.getElementById('btn-torna-hub-rimborso'),
+  btnPrevMonthRimborso: document.getElementById('btn-prev-month-rimborso'),
+  btnNextMonthRimborso: document.getElementById('btn-next-month-rimborso'),
+  monthLabelRimborso: document.getElementById('month-label-rimborso'),
+  monthClosedBadgeRimborso: document.getElementById('month-closed-badge-rimborso'),
+  btnReopenMonthRimborso: document.getElementById('btn-reopen-month-rimborso'),
+  btnCloseMonthRimborso: document.getElementById('btn-close-month-rimborso'),
+  btnAddSpesa: document.getElementById('btn-add-spesa'),
+  listaSpese: document.getElementById('lista-spese'),
+  listaSpeseEmpty: document.getElementById('lista-spese-empty'),
+  totaleCarta: document.getElementById('totale-carta'),
+  totaleDipendente: document.getElementById('totale-dipendente'),
+  totaleConvenzione: document.getElementById('totale-convenzione'),
+
+  viewSpesaForm: document.getElementById('view-spesa-form'),
+  formSpesa: document.getElementById('form-spesa'),
+  btnSpesaFormAnnulla: document.getElementById('btn-spesa-form-annulla'),
+  inputSpesaData: document.getElementById('input-spesa-data'),
+  inputSpesaEsercente: document.getElementById('input-spesa-esercente'),
+  listaEsercenti: document.getElementById('lista-esercenti'),
+  inputSpesaLuogo: document.getElementById('input-spesa-luogo'),
+  inputSpesaDescrizione: document.getElementById('input-spesa-descrizione'),
+  inputSpesaImporto: document.getElementById('input-spesa-importo'),
+  inputSpesaNote: document.getElementById('input-spesa-note'),
 
   viewDashboard: document.getElementById('view-dashboard'),
   viewArchive: document.getElementById('view-archive'),
@@ -945,9 +1045,195 @@ el.selectDipendente.addEventListener('change', () => {
 });
 
 el.cardScontrini.addEventListener('click', apriScontrini);
-el.cardRimborso.addEventListener('click', () => alert('Modulo in costruzione'));
+el.cardRimborso.addEventListener('click', apriRimborso);
 el.cardAttivita.addEventListener('click', () => alert('Modulo in costruzione'));
 el.btnTornaHub.addEventListener('click', tornaAllHub);
+
+/* =========================================================
+   RIMBORSO
+   ========================================================= */
+
+function formatoImporto(numero) {
+  return `${(numero || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+}
+
+function etichettaPagamento(pagamento) {
+  if (pagamento === 'carta_aziendale') return 'Carta aziendale';
+  if (pagamento === 'pagato_dipendente') return 'Pagato dal dipendente';
+  return 'Convenzione';
+}
+
+async function apriRimborso() {
+  el.viewHub.classList.add('hidden');
+  el.viewRimborso.classList.remove('hidden');
+  await aggiornaRimborso();
+}
+
+function tornaAllHubDaRimborso() {
+  el.viewRimborso.classList.add('hidden');
+  el.viewHub.classList.remove('hidden');
+}
+
+async function cambiaMeseRimborso(delta) {
+  stato.meseAttivoRimborso = aggiungiMesi(stato.meseAttivoRimborso, delta);
+  await aggiornaRimborso();
+}
+
+async function aggiornaRimborso() {
+  el.monthLabelRimborso.textContent = etichettaMese(stato.meseAttivoRimborso);
+
+  const [statoMese, spese] = await Promise.all([
+    getStatoMeseRimborso(stato.meseAttivoRimborso),
+    getSpeseDelMese(stato.meseAttivoRimborso)
+  ]);
+
+  const chiuso = statoMese.chiuso;
+  el.monthClosedBadgeRimborso.classList.toggle('hidden', !chiuso);
+  el.btnAddSpesa.disabled = chiuso;
+  el.btnReopenMonthRimborso.classList.toggle('hidden', !chiuso);
+
+  let totaleCarta = 0, totaleDipendente = 0, totaleConvenzione = 0;
+  for (const s of spese) {
+    if (s.pagamento === 'carta_aziendale') totaleCarta += s.importo;
+    else if (s.pagamento === 'pagato_dipendente') totaleDipendente += s.importo;
+    else if (s.pagamento === 'convenzione') totaleConvenzione += s.importo;
+  }
+  el.totaleCarta.textContent = formatoImporto(totaleCarta);
+  el.totaleDipendente.textContent = formatoImporto(totaleDipendente);
+  el.totaleConvenzione.textContent = formatoImporto(totaleConvenzione);
+
+  renderListaSpese(spese);
+}
+
+function renderListaSpese(spese) {
+  el.listaSpese.innerHTML = '';
+  el.listaSpeseEmpty.classList.toggle('hidden', spese.length > 0);
+
+  for (const s of spese) {
+    const div = document.createElement('div');
+    div.className = 'spesa-item';
+
+    const info = document.createElement('div');
+    info.className = 'spesa-item-info';
+
+    const titolo = document.createElement('span');
+    titolo.className = 'spesa-item-titolo';
+    titolo.textContent = `${parseDataISO(s.data).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })} · ${s.esercente}`;
+    info.appendChild(titolo);
+
+    const dettaglioParti = [s.luogo, s.descrizione, etichettaPagamento(s.pagamento)].filter(Boolean);
+    const dettaglio = document.createElement('span');
+    dettaglio.className = 'spesa-item-dettaglio';
+    dettaglio.textContent = dettaglioParti.join(' · ');
+    info.appendChild(dettaglio);
+
+    div.appendChild(info);
+
+    const importo = document.createElement('span');
+    importo.className = 'spesa-item-importo';
+    importo.textContent = formatoImporto(s.importo);
+    div.appendChild(importo);
+
+    div.addEventListener('click', () => eliminaSpesaConferma(s));
+    el.listaSpese.appendChild(div);
+  }
+}
+
+async function eliminaSpesaConferma(spesa) {
+  const dataEtichetta = parseDataISO(spesa.data).toLocaleDateString('it-IT');
+  const conferma = await chiediConferma(`Eliminare la spesa "${spesa.esercente}" del ${dataEtichetta}?`);
+  if (!conferma) return;
+  await eliminaSpesa(spesa.id);
+  await aggiornaRimborso();
+}
+
+async function chiudiMeseRimborso() {
+  const conferma = await chiediConferma(
+    `Hai già esportato il PDF di ${etichettaMese(stato.meseAttivoRimborso)}? Chiudendo il mese, l'inserimento spese verrà disattivato (potrai comunque riaprirlo in seguito).`
+  );
+  if (!conferma) return;
+  await setStatoMeseRimborso(stato.meseAttivoRimborso, true);
+  await aggiornaRimborso();
+}
+
+async function riapriMeseRimborso() {
+  const conferma = await chiediConferma(`Riaprire ${etichettaMese(stato.meseAttivoRimborso)} per modificarlo?`);
+  if (!conferma) return;
+  await setStatoMeseRimborso(stato.meseAttivoRimborso, false);
+  await aggiornaRimborso();
+}
+
+/* =========================================================
+   FORM NUOVA SPESA
+   ========================================================= */
+
+async function aggiornaListaEsercenti() {
+  const tutte = await getTutteLeSpese();
+  const nomi = [...new Set(tutte.map(s => s.esercente).filter(Boolean))].sort();
+  el.listaEsercenti.innerHTML = '';
+  for (const nome of nomi) {
+    const option = document.createElement('option');
+    option.value = nome;
+    el.listaEsercenti.appendChild(option);
+  }
+}
+
+async function onEsercenteChange() {
+  const nome = el.inputSpesaEsercente.value.trim();
+  if (!nome) return;
+  const ultima = await getUltimaSpesaPerEsercente(nome);
+  if (ultima) {
+    el.inputSpesaLuogo.value = ultima.luogo || '';
+    el.inputSpesaDescrizione.value = ultima.descrizione || '';
+  }
+}
+
+async function apriFormSpesa() {
+  el.formSpesa.reset();
+  el.inputSpesaData.value = dataISOCorrente();
+  await aggiornaListaEsercenti();
+  el.viewRimborso.classList.add('hidden');
+  el.viewSpesaForm.classList.remove('hidden');
+}
+
+function chiudiFormSpesa() {
+  el.viewSpesaForm.classList.add('hidden');
+  el.viewRimborso.classList.remove('hidden');
+}
+
+async function salvaFormSpesa(e) {
+  e.preventDefault();
+
+  const giustificativoEl = el.formSpesa.querySelector('input[name="giustificativo"]:checked');
+  const pagamentoEl = el.formSpesa.querySelector('input[name="pagamento"]:checked');
+
+  const spesa = {
+    meseAnno: stato.meseAttivoRimborso,
+    data: el.inputSpesaData.value,
+    esercente: el.inputSpesaEsercente.value.trim(),
+    luogo: el.inputSpesaLuogo.value.trim(),
+    descrizione: el.inputSpesaDescrizione.value.trim(),
+    giustificativo: giustificativoEl.value,
+    pagamento: pagamentoEl.value,
+    importo: Math.round(parseFloat(el.inputSpesaImporto.value) * 100) / 100,
+    note: el.inputSpesaNote.value.trim(),
+    creatoIl: new Date().toISOString()
+  };
+
+  await salvaSpesa(spesa);
+  chiudiFormSpesa();
+  await aggiornaRimborso();
+}
+
+el.btnTornaHubRimborso.addEventListener('click', tornaAllHubDaRimborso);
+el.btnPrevMonthRimborso.addEventListener('click', () => cambiaMeseRimborso(-1));
+el.btnNextMonthRimborso.addEventListener('click', () => cambiaMeseRimborso(1));
+el.btnReopenMonthRimborso.addEventListener('click', riapriMeseRimborso);
+el.btnCloseMonthRimborso.addEventListener('click', chiudiMeseRimborso);
+el.btnAddSpesa.addEventListener('click', apriFormSpesa);
+el.btnSpesaFormAnnulla.addEventListener('click', chiudiFormSpesa);
+el.inputSpesaEsercente.addEventListener('change', onEsercenteChange);
+el.formSpesa.addEventListener('submit', salvaFormSpesa);
 
 /* =========================================================
    AVVIO APP
@@ -958,6 +1244,7 @@ async function avvia() {
   dimensionaFiligranaHub();
   stato.meseAttivo = await determinaMeseAttivoIniziale();
   await aggiornaDashboard();
+  stato.meseAttivoRimborso = await determinaMeseAttivoRimborsoIniziale();
 }
 
 avvia();

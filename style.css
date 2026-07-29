@@ -516,6 +516,129 @@ body {
   padding: 24px 0;
 }
 
+/* ---------- Rimborso ---------- */
+.rimborso-totali {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--bg-light);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+
+.rimborso-totale-riga {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.95rem;
+}
+
+.rimborso-totale-riga strong {
+  color: var(--primary-blue-dark);
+}
+
+.lista-spese {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.spesa-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: var(--bg-white);
+  cursor: pointer;
+}
+
+.spesa-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.spesa-item-titolo {
+  font-weight: 700;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spesa-item-dettaglio {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spesa-item-importo {
+  font-weight: 700;
+  color: var(--primary-blue-dark);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.spesa-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.campo-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.campo-label input {
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 1rem;
+  font-family: inherit;
+  color: var(--text-dark);
+}
+
+.campo-fieldset {
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+}
+
+.campo-fieldset legend {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 0 4px;
+}
+
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.95rem;
+}
+
+.spesa-form-salva {
+  padding: 14px;
+  font-size: 1rem;
+  margin-top: 4px;
+}
+
 /* ---------- Camera view ---------- */
 .camera-view {
   position: fixed;

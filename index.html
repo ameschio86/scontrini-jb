@@ -54,11 +54,11 @@
           <span class="hub-card-subtitle">Foto e archivio spese</span>
         </span>
       </button>
-      <button id="card-rimborso" class="hub-card hub-card-inarrivo">
+      <button id="card-rimborso" class="hub-card hub-card-attivo">
         <span class="hub-card-icon">💶</span>
         <span class="hub-card-text">
           <span class="hub-card-title">Rimborso</span>
-          <span class="hub-card-subtitle">In arrivo</span>
+          <span class="hub-card-subtitle">Registro spese mensile</span>
         </span>
       </button>
       <button id="card-attivita" class="hub-card hub-card-inarrivo">
@@ -130,6 +130,100 @@
       <h1 class="app-title">Mesi precedenti</h1>
     </header>
     <div id="archive-list" class="archive-list"></div>
+  </section>
+
+  <!-- ===================== VISTA RIMBORSO ===================== -->
+  <section id="view-rimborso" class="view hidden">
+    <header class="app-header">
+      <button id="btn-torna-hub-rimborso" class="btn-back" aria-label="Torna all'hub">←</button>
+      <h1 class="app-title">Rimborso</h1>
+    </header>
+
+    <div class="month-selector">
+      <button id="btn-prev-month-rimborso" class="btn-arrow" aria-label="Mese precedente">◀</button>
+      <div class="month-label-wrap">
+        <span id="month-label-rimborso" class="month-label">—</span>
+        <span id="month-closed-badge-rimborso" class="badge-closed hidden">✓ Mese chiuso</span>
+      </div>
+      <button id="btn-next-month-rimborso" class="btn-arrow" aria-label="Mese successivo">▶</button>
+    </div>
+
+    <button id="btn-reopen-month-rimborso" class="btn-secondary hidden">🔓 Riapri mese</button>
+
+    <!-- Zona inserimento -->
+    <button id="btn-add-spesa" class="btn-capture btn-generico">+ Aggiungi spesa</button>
+
+    <!-- Riepilogo voci -->
+    <div class="rimborso-totali">
+      <div class="rimborso-totale-riga">
+        <span>Carta aziendale</span>
+        <strong id="totale-carta">0,00 €</strong>
+      </div>
+      <div class="rimborso-totale-riga">
+        <span>Pagato dal dipendente</span>
+        <strong id="totale-dipendente">0,00 €</strong>
+      </div>
+      <div class="rimborso-totale-riga">
+        <span>Convenzione</span>
+        <strong id="totale-convenzione">0,00 €</strong>
+      </div>
+    </div>
+
+    <div id="lista-spese" class="lista-spese"></div>
+    <p id="lista-spese-empty" class="gallery-empty hidden">Nessuna spesa registrata per questo mese.</p>
+
+    <!-- Export (in arrivo nel prossimo passo) -->
+    <button id="btn-close-month-rimborso" class="btn-close-month">Chiudi mese</button>
+  </section>
+
+  <!-- ===================== VISTA FORM SPESA ===================== -->
+  <section id="view-spesa-form" class="view hidden">
+    <header class="app-header">
+      <button id="btn-spesa-form-annulla" class="btn-back" aria-label="Annulla">←</button>
+      <h1 class="app-title">Nuova spesa</h1>
+    </header>
+
+    <form id="form-spesa" class="spesa-form">
+      <label class="campo-label">Data
+        <input type="date" id="input-spesa-data" required>
+      </label>
+
+      <label class="campo-label">Esercente
+        <input type="text" id="input-spesa-esercente" list="lista-esercenti" autocomplete="off" required>
+        <datalist id="lista-esercenti"></datalist>
+      </label>
+
+      <label class="campo-label">Luogo
+        <input type="text" id="input-spesa-luogo">
+      </label>
+
+      <label class="campo-label">Descrizione spesa
+        <input type="text" id="input-spesa-descrizione">
+      </label>
+
+      <fieldset class="campo-fieldset">
+        <legend>Giustificativo</legend>
+        <label class="radio-label"><input type="radio" name="giustificativo" value="fattura" required> Fattura</label>
+        <label class="radio-label"><input type="radio" name="giustificativo" value="scontrino"> Scontrino</label>
+      </fieldset>
+
+      <fieldset class="campo-fieldset">
+        <legend>Modalità pagamento</legend>
+        <label class="radio-label"><input type="radio" name="pagamento" value="carta_aziendale" required> Carta aziendale</label>
+        <label class="radio-label"><input type="radio" name="pagamento" value="pagato_dipendente"> Pagato dal dipendente</label>
+        <label class="radio-label"><input type="radio" name="pagamento" value="convenzione"> Convenzione</label>
+      </fieldset>
+
+      <label class="campo-label">Importo (€)
+        <input type="number" id="input-spesa-importo" step="0.01" min="0" required>
+      </label>
+
+      <label class="campo-label">Note
+        <input type="text" id="input-spesa-note">
+      </label>
+
+      <button type="submit" class="btn-primary spesa-form-salva">Salva spesa</button>
+    </form>
   </section>
 
   <!-- ===================== VISTA FOTOCAMERA ===================== -->
