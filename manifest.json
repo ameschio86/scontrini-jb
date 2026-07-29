@@ -1,7 +1,7 @@
 {
-  "name": "L&B Scontrini",
-  "short_name": "Scontrini L&B",
-  "description": "Archiviazione fotografica di scontrini di lavoro con export mensile in PDF",
+  "name": "L&B Gestionale",
+  "short_name": "Gestionale L&B",
+  "description": "Gestionale L&B: scontrini, rimborsi e attività di cantiere",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

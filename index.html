@@ -7,8 +7,8 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Scontrini L&B">
-<title>L&B Scontrini</title>
+<meta name="apple-mobile-web-app-title" content="Gestionale L&B">
+<title>L&B Gestionale</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -18,10 +18,60 @@
 
 <div id="app">
 
+  <!-- ===================== VISTA HUB ===================== -->
+  <section id="view-hub" class="view hub-view">
+    <div class="hub-swoosh" aria-hidden="true">
+      <svg viewBox="0 0 400 120" preserveAspectRatio="none">
+        <path d="M0,80 C120,20 280,110 400,40 L400,0 L0,0 Z" fill="#cfe6ff"></path>
+        <path d="M0,95 C130,45 270,120 400,60" fill="none" stroke="#0080FF" stroke-width="4"></path>
+      </svg>
+    </div>
+
+    <header class="app-header hub-header">
+      <img src="icons/icon-512.png" alt="Logo L&B" class="logo">
+      <h1 class="app-title">L&B Gestionale</h1>
+    </header>
+
+    <div class="dipendente-field">
+      <label for="select-dipendente">Dipendente</label>
+      <select id="select-dipendente">
+        <option value="" disabled selected>— Seleziona —</option>
+        <option value="Sebastiano Lovison">Sebastiano Lovison</option>
+        <option value="Paolo Benà">Paolo Benà</option>
+        <option value="Alessandro Meschiari">Alessandro Meschiari</option>
+      </select>
+    </div>
+
+    <div class="hub-cards">
+      <button id="card-scontrini" class="hub-card hub-card-attivo">
+        <span class="hub-card-icon">📷</span>
+        <span class="hub-card-text">
+          <span class="hub-card-title">Scontrini</span>
+          <span class="hub-card-subtitle">Foto e archivio spese</span>
+        </span>
+      </button>
+      <button id="card-rimborso" class="hub-card hub-card-inarrivo">
+        <span class="hub-card-icon">💶</span>
+        <span class="hub-card-text">
+          <span class="hub-card-title">Rimborso</span>
+          <span class="hub-card-subtitle">In arrivo</span>
+        </span>
+      </button>
+      <button id="card-attivita" class="hub-card hub-card-inarrivo">
+        <span class="hub-card-icon">📋</span>
+        <span class="hub-card-text">
+          <span class="hub-card-title">Attività</span>
+          <span class="hub-card-subtitle">In arrivo</span>
+        </span>
+      </button>
+    </div>
+  </section>
+
   <!-- ===================== VISTA DASHBOARD ===================== -->
-  <section id="view-dashboard" class="view">
+  <section id="view-dashboard" class="view hidden">
 
     <header class="app-header">
+      <button id="btn-torna-hub" class="btn-back" aria-label="Torna all'hub">←</button>
       <img src="icons/icon-512.png" alt="Logo L&B" class="logo">
       <h1 class="app-title">Scontrini</h1>
     </header>

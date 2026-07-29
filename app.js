@@ -39,14 +39,31 @@ function etichettaMese(meseAnno) {
   return `${MESI_IT[mese - 1]} ${anno}`;
 }
 
-function etichettaMeseFile(meseAnno) {
-  const { anno, mese } = scomponiMeseAnno(meseAnno);
-  return `${MESI_IT[mese - 1]}${anno}`;
-}
-
 function dataISOCorrente() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function dataOdiernaCompatta() {
+  const d = new Date();
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function invertiNomeCognome(nomeCognome) {
+  const parti = nomeCognome.trim().split(/\s+/);
+  if (parti.length < 2) return nomeCognome;
+  const cognome = parti[parti.length - 1];
+  const nome = parti.slice(0, -1).join(' ');
+  return `${cognome} ${nome}`;
+}
+
+function nomeFileExport(categoria, meseAnno) {
+  const { mese } = scomponiMeseAnno(meseAnno);
+  const nomeMese = MESI_IT[mese - 1];
+  const dipendente = localStorage.getItem('dipendenteAttivo');
+  const cognomeNome = dipendente ? invertiNomeCognome(dipendente) : 'Dipendente non impostato';
+  const tipo = categoria === 'gasolio' ? 'Rimborso gasolio' : 'Rimborso scontrini';
+  return `${dataOdiernaCompatta()} - ${tipo} ${nomeMese} - ${cognomeNome}.pdf`;
 }
 
 function parseDataISO(str) {
@@ -188,6 +205,13 @@ const stato = {
    ========================================================= */
 
 const el = {
+  viewHub: document.getElementById('view-hub'),
+  selectDipendente: document.getElementById('select-dipendente'),
+  cardScontrini: document.getElementById('card-scontrini'),
+  cardRimborso: document.getElementById('card-rimborso'),
+  cardAttivita: document.getElementById('card-attivita'),
+  btnTornaHub: document.getElementById('btn-torna-hub'),
+
   viewDashboard: document.getElementById('view-dashboard'),
   viewArchive: document.getElementById('view-archive'),
   viewCamera: document.getElementById('view-camera'),
@@ -786,8 +810,7 @@ async function esportaPdf(categoria, meseAnno) {
     doc.addImage(dataUrl, 'JPEG', x, y, w, h);
   }
 
-  const prefisso = categoria === 'gasolio' ? 'Gasolio' : 'Rimborso';
-  doc.save(`${prefisso}_${etichettaMeseFile(meseAnno)}.pdf`);
+  doc.save(nomeFileExport(categoria, meseAnno));
 }
 
 /* =========================================================
@@ -883,10 +906,39 @@ el.btnOverlayClose.addEventListener('click', chiudiOverlay);
 el.btnOverlayDelete.addEventListener('click', eliminaRicevutaCorrente);
 
 /* =========================================================
+   HUB / DIPENDENTE ATTIVO
+   ========================================================= */
+
+function inizializzaDipendente() {
+  const salvato = localStorage.getItem('dipendenteAttivo');
+  if (salvato) el.selectDipendente.value = salvato;
+}
+
+function apriScontrini() {
+  el.viewHub.classList.add('hidden');
+  el.viewDashboard.classList.remove('hidden');
+}
+
+function tornaAllHub() {
+  el.viewDashboard.classList.add('hidden');
+  el.viewHub.classList.remove('hidden');
+}
+
+el.selectDipendente.addEventListener('change', () => {
+  localStorage.setItem('dipendenteAttivo', el.selectDipendente.value);
+});
+
+el.cardScontrini.addEventListener('click', apriScontrini);
+el.cardRimborso.addEventListener('click', () => alert('Modulo in costruzione'));
+el.cardAttivita.addEventListener('click', () => alert('Modulo in costruzione'));
+el.btnTornaHub.addEventListener('click', tornaAllHub);
+
+/* =========================================================
    AVVIO APP
    ========================================================= */
 
 async function avvia() {
+  inizializzaDipendente();
   stato.meseAttivo = await determinaMeseAttivoIniziale();
   await aggiornaDashboard();
 }
