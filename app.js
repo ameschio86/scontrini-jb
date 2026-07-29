@@ -5,11 +5,12 @@
    ========================================================= */
 
 const DB_NAME = 'ScontriniDB';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE_RICEVUTE = 'ricevute';
 const STORE_STATO_MESI = 'statoMesi';
 const STORE_SPESE = 'spese';
 const STORE_STATO_MESI_RIMBORSO = 'statoMesiRimborso';
+const STORE_FIRME = 'firme';
 const MAX_LATO_LUNGO = 2200;
 const JPEG_QUALITY = 0.85;
 
@@ -108,6 +109,9 @@ function apriDB() {
       }
       if (!db.objectStoreNames.contains(STORE_STATO_MESI_RIMBORSO)) {
         db.createObjectStore(STORE_STATO_MESI_RIMBORSO, { keyPath: 'meseAnno' });
+      }
+      if (!db.objectStoreNames.contains(STORE_FIRME)) {
+        db.createObjectStore(STORE_FIRME, { keyPath: 'dipendente' });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -226,6 +230,93 @@ async function determinaMeseAttivoRimborsoIniziale() {
   return precedentiAperti.length > 0 ? precedentiAperti[0] : correnteMese;
 }
 
+async function getFirma(dipendente) {
+  if (!dipendente) return null;
+  const { store } = await txStore(STORE_FIRME, 'readonly');
+  const result = await reqAsPromise(store.get(dipendente));
+  return result ? result.immagine : null;
+}
+
+async function salvaFirma(dipendente, blob) {
+  const { store } = await txStore(STORE_FIRME, 'readwrite');
+  return reqAsPromise(store.put({ dipendente, immagine: blob }));
+}
+
+async function eliminaFirma(dipendente) {
+  const { store } = await txStore(STORE_FIRME, 'readwrite');
+  return reqAsPromise(store.delete(dipendente));
+}
+
+function pulisciFirma(sourceCanvas) {
+  const { width, height } = sourceCanvas;
+  const ctx = sourceCanvas.getContext('2d');
+  const dati = ctx.getImageData(0, 0, width, height);
+  const px = dati.data;
+
+  const SOGLIA_SCURA = 90;
+  const SOGLIA_CHIARA = 110;
+  const [inkR, inkG, inkB] = [20, 20, 90];
+
+  for (let i = 0; i < px.length; i += 4) {
+    const r = px[i], g = px[i + 1], b = px[i + 2];
+    const luminosita = 0.299 * r + 0.587 * g + 0.114 * b;
+
+    let alpha;
+    if (luminosita <= SOGLIA_SCURA) alpha = 255;
+    else if (luminosita >= SOGLIA_CHIARA) alpha = 0;
+    else alpha = Math.round(255 * (SOGLIA_CHIARA - luminosita) / (SOGLIA_CHIARA - SOGLIA_SCURA));
+
+    px[i] = inkR;
+    px[i + 1] = inkG;
+    px[i + 2] = inkB;
+    px[i + 3] = alpha;
+  }
+
+  ctx.putImageData(dati, 0, 0);
+  return new Promise((resolve) => sourceCanvas.toBlob(resolve, 'image/png'));
+}
+
+async function gestisciCaricamentoFirma(file) {
+  const dipendente = localStorage.getItem('dipendenteAttivo');
+  if (!dipendente) {
+    alert('Seleziona prima un dipendente nell\'hub.');
+    return;
+  }
+
+  const img = new Image();
+  const url = URL.createObjectURL(file);
+  await new Promise((resolve, reject) => {
+    img.onload = resolve;
+    img.onerror = reject;
+    img.src = url;
+  });
+  URL.revokeObjectURL(url);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  canvas.getContext('2d').drawImage(img, 0, 0);
+
+  const blobPulito = await pulisciFirma(canvas);
+  await salvaFirma(dipendente, blobPulito);
+  await aggiornaStatoFirma();
+  alert(`Firma salvata per ${dipendente}.`);
+}
+
+async function aggiornaStatoFirma() {
+  const dipendente = localStorage.getItem('dipendenteAttivo');
+  if (!dipendente) {
+    el.statoFirma.textContent = 'Seleziona un dipendente nell\'hub per gestire la firma.';
+    el.btnEliminaFirma.classList.add('hidden');
+    return;
+  }
+  const firma = await getFirma(dipendente);
+  el.statoFirma.textContent = firma
+    ? `Firma salvata per ${dipendente}.`
+    : `Nessuna firma salvata per ${dipendente} (il PDF verrà esportato senza firma).`;
+  el.btnEliminaFirma.classList.toggle('hidden', !firma);
+}
+
 async function getTuttiIMesi() {
   const [ricevuteDb, statiDb] = await Promise.all([
     (async () => {
@@ -296,12 +387,16 @@ const el = {
   monthClosedBadgeRimborso: document.getElementById('month-closed-badge-rimborso'),
   btnReopenMonthRimborso: document.getElementById('btn-reopen-month-rimborso'),
   btnCloseMonthRimborso: document.getElementById('btn-close-month-rimborso'),
+  btnExportRimborso: document.getElementById('btn-export-rimborso'),
+  statoFirma: document.getElementById('stato-firma'),
+  btnCaricaFirma: document.getElementById('btn-carica-firma'),
+  btnEliminaFirma: document.getElementById('btn-elimina-firma'),
+  inputFirmaUpload: document.getElementById('input-firma-upload'),
   btnAddSpesa: document.getElementById('btn-add-spesa'),
   listaSpese: document.getElementById('lista-spese'),
   listaSpeseEmpty: document.getElementById('lista-spese-empty'),
   totaleCarta: document.getElementById('totale-carta'),
   totaleDipendente: document.getElementById('totale-dipendente'),
-  totaleConvenzione: document.getElementById('totale-convenzione'),
 
   viewSpesaForm: document.getElementById('view-spesa-form'),
   formSpesa: document.getElementById('form-spesa'),
@@ -1092,17 +1187,16 @@ async function aggiornaRimborso() {
   el.btnAddSpesa.disabled = chiuso;
   el.btnReopenMonthRimborso.classList.toggle('hidden', !chiuso);
 
-  let totaleCarta = 0, totaleDipendente = 0, totaleConvenzione = 0;
+  let totaleCarta = 0, totaleOggettoRimborso = 0;
   for (const s of spese) {
     if (s.pagamento === 'carta_aziendale') totaleCarta += s.importo;
-    else if (s.pagamento === 'pagato_dipendente') totaleDipendente += s.importo;
-    else if (s.pagamento === 'convenzione') totaleConvenzione += s.importo;
+    else totaleOggettoRimborso += s.importo;
   }
   el.totaleCarta.textContent = formatoImporto(totaleCarta);
-  el.totaleDipendente.textContent = formatoImporto(totaleDipendente);
-  el.totaleConvenzione.textContent = formatoImporto(totaleConvenzione);
+  el.totaleDipendente.textContent = formatoImporto(totaleOggettoRimborso);
 
   renderListaSpese(spese);
+  await aggiornaStatoFirma();
 }
 
 function renderListaSpese(spese) {
@@ -1161,6 +1255,201 @@ async function riapriMeseRimborso() {
   if (!conferma) return;
   await setStatoMeseRimborso(stato.meseAttivoRimborso, false);
   await aggiornaRimborso();
+}
+
+/* =========================================================
+   EXPORT PDF RIMBORSO (overlay sul modulo aziendale originale)
+   ========================================================= */
+
+const RIMBORSO_TEMPLATE = {
+  basePdfPath: 'templates/rimborso_spese_base.pdf',
+  pageHeight: 595.2,
+  colonne: {
+    DATA: [23.7, 83.9],
+    ESERCENTE: [83.9, 203.2],
+    LUOGO: [203.2, 316.8],
+    DESCRIZIONE: [316.8, 385.7],
+    FATTURA: [385.7, 407.9],
+    SCONTRINO: [407.9, 430.1],
+    CONVENZIONE: [430.1, 453.7],
+    CARTA_AZIENDALE: [453.7, 481.4],
+    PAGATO_DIPENDENTE: [481.4, 509.2],
+    IMPORTO_CARTA: [509.2, 571.3],
+    IMPORTO_DIPENDENTE: [571.3, 633.5],
+    IMPORTO_CONVENZIONE: [633.5, 707.1],
+    NOTE: [707.1, 817.5]
+  },
+  righePagina1: [231.6, 251.9, 272.6, 293.2, 313.9, 334.5, 355.2, 375.8, 396.5, 417.1, 437.8, 458.4, 479.0, 499.7, 520.4],
+  righePagina2: [161.3, 181.97, 202.63, 223.3, 243.97, 264.63, 285.3, 305.97, 326.63, 347.3, 367.97, 388.63],
+  campiFissi: {
+    mese: { x: 495.5, top: 119.0 },
+    anno: { x: 660.3, top: 119.0 },
+    nomeIncarico: { x: 136.6, top: 138.9 },
+    paginaNum: { x: 763.1, top: 120.7 },
+    paginaTot: { x: 798.1, top: 120.7 }
+  },
+  totali: {
+    totCarta: { top: 409.2 },
+    totOggettoRimborso: { top: 430.0 }
+  },
+  attestazione: {
+    nome: { x: 118.0, top: 466.4 },
+    firma: { x: 546.2, top: 454.56, width: 72.8, height: 62.0 }
+  }
+};
+
+function pdfLibY(top, altezzaTesto = 8) {
+  return RIMBORSO_TEMPLATE.pageHeight - top - altezzaTesto;
+}
+
+async function caricaBytes(percorso) {
+  const risposta = await fetch(percorso);
+  return risposta.arrayBuffer();
+}
+
+function centraTestoInColonna(font, testo, dimensione, colonna) {
+  const larghezza = font.widthOfTextAtSize(testo, dimensione);
+  const centro = (colonna[0] + colonna[1]) / 2;
+  return centro - larghezza / 2;
+}
+
+function allineaADestraInColonna(font, testo, dimensione, colonna, margineDestro = 4) {
+  const larghezza = font.widthOfTextAtSize(testo, dimensione);
+  return colonna[1] - margineDestro - larghezza;
+}
+
+function nomeFileExportRimborso(meseAnno) {
+  const { mese } = scomponiMeseAnno(meseAnno);
+  const nomeMese = MESI_IT[mese - 1];
+  const dipendente = localStorage.getItem('dipendenteAttivo');
+  const cognomeNome = dipendente ? invertiNomeCognome(dipendente) : 'Dipendente non impostato';
+  return `${dataOdiernaCompatta()} - Rimborso spese ${nomeMese} - ${cognomeNome}.pdf`;
+}
+
+async function generaPdfRimborso(meseAnno) {
+  const spese = await getSpeseDelMese(meseAnno);
+  if (spese.length === 0) {
+    alert(`Nessuna spesa da esportare per ${etichettaMese(meseAnno)}.`);
+    return;
+  }
+
+  const capienzaP1 = RIMBORSO_TEMPLATE.righePagina1.length;
+  const capienzaP2 = RIMBORSO_TEMPLATE.righePagina2.length;
+  if (spese.length > capienzaP1 + capienzaP2) {
+    alert(`Questo mese ha ${spese.length} spese, più delle ${capienzaP1 + capienzaP2} righe disponibili sul modulo (2 pagine). Elimina o sposta qualche voce prima di esportare: la gestione di una terza pagina non è ancora disponibile.`);
+    return;
+  }
+
+  const { PDFDocument, StandardFonts, rgb } = PDFLib;
+  const dipendenteAttivo = localStorage.getItem('dipendenteAttivo');
+
+  const baseBytes = await caricaBytes(RIMBORSO_TEMPLATE.basePdfPath);
+  const doc = await PDFDocument.load(baseBytes);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const nero = rgb(0, 0, 0);
+  const DIM = 8;
+
+  const pagina1 = doc.getPage(0);
+  const pagina2 = doc.getPage(1);
+
+  const { anno, mese } = scomponiMeseAnno(meseAnno);
+  const nomeMese = MESI_IT[mese - 1].toUpperCase();
+  const cognomeNome = dipendenteAttivo ? invertiNomeCognome(dipendenteAttivo).toUpperCase() : '';
+
+  function scriviCampiFissi(page, numeroPagina) {
+    const cf = RIMBORSO_TEMPLATE.campiFissi;
+    page.drawText(nomeMese, { x: cf.mese.x, y: pdfLibY(cf.mese.top), size: DIM, font, color: nero });
+    page.drawText(String(anno), { x: cf.anno.x, y: pdfLibY(cf.anno.top), size: DIM, font, color: nero });
+    page.drawText(String(numeroPagina), { x: cf.paginaNum.x, y: pdfLibY(cf.paginaNum.top), size: DIM, font, color: nero });
+    page.drawText('2', { x: cf.paginaTot.x, y: pdfLibY(cf.paginaTot.top), size: DIM, font, color: nero });
+    if (cognomeNome) {
+      page.drawText(cognomeNome, { x: cf.nomeIncarico.x, y: pdfLibY(cf.nomeIncarico.top), size: DIM, font: fontBold, color: nero });
+    }
+  }
+
+  function scriviRiga(page, rigaTop, spesa) {
+    const c = RIMBORSO_TEMPLATE.colonne;
+    const y = pdfLibY(rigaTop);
+
+    const dataFormattata = parseDataISO(spesa.data).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    page.drawText(dataFormattata, { x: centraTestoInColonna(font, dataFormattata, DIM, c.DATA), y, size: DIM, font, color: nero });
+    page.drawText((spesa.esercente || '').toUpperCase(), { x: c.ESERCENTE[0] + 3, y, size: DIM, font, color: nero });
+    page.drawText((spesa.luogo || '').toUpperCase(), { x: c.LUOGO[0] + 3, y, size: DIM, font, color: nero });
+    page.drawText((spesa.descrizione || '').toUpperCase(), { x: c.DESCRIZIONE[0] + 3, y, size: DIM, font, color: nero });
+
+    const colonnaGiustificativo = spesa.giustificativo === 'scontrino' ? c.SCONTRINO : c.FATTURA;
+    page.drawText('X', { x: centraTestoInColonna(fontBold, 'X', DIM, colonnaGiustificativo), y, size: DIM, font: fontBold, color: nero });
+
+    const colonnaPagamento = spesa.pagamento === 'pagato_dipendente' ? c.PAGATO_DIPENDENTE
+      : spesa.pagamento === 'convenzione' ? c.CONVENZIONE
+      : c.CARTA_AZIENDALE;
+    page.drawText('X', { x: centraTestoInColonna(fontBold, 'X', DIM, colonnaPagamento), y, size: DIM, font: fontBold, color: nero });
+
+    const colonnaImporto = spesa.pagamento === 'pagato_dipendente' ? c.IMPORTO_DIPENDENTE
+      : spesa.pagamento === 'convenzione' ? c.IMPORTO_CONVENZIONE
+      : c.IMPORTO_CARTA;
+    const importoFormattato = formatoImporto(spesa.importo);
+    page.drawText(importoFormattato, { x: allineaADestraInColonna(font, importoFormattato, DIM, colonnaImporto), y, size: DIM, font, color: nero });
+
+    if (spesa.note) {
+      page.drawText(spesa.note.toUpperCase(), { x: c.NOTE[0] + 3, y, size: DIM, font, color: nero });
+    }
+  }
+
+  scriviCampiFissi(pagina1, 1);
+  scriviCampiFissi(pagina2, 2);
+
+  const spesePagina1 = spese.slice(0, capienzaP1);
+  const spesePagina2 = spese.slice(capienzaP1);
+  spesePagina1.forEach((s, i) => scriviRiga(pagina1, RIMBORSO_TEMPLATE.righePagina1[i], s));
+  spesePagina2.forEach((s, i) => scriviRiga(pagina2, RIMBORSO_TEMPLATE.righePagina2[i], s));
+
+  let totaleCarta = 0, totaleOggettoRimborso = 0;
+  for (const s of spese) {
+    if (s.pagamento === 'carta_aziendale') totaleCarta += s.importo;
+    else totaleOggettoRimborso += s.importo;
+  }
+
+  const testoTotCarta = formatoImporto(totaleCarta);
+  pagina2.drawText(testoTotCarta, {
+    x: allineaADestraInColonna(font, testoTotCarta, DIM, RIMBORSO_TEMPLATE.colonne.IMPORTO_CARTA),
+    y: pdfLibY(RIMBORSO_TEMPLATE.totali.totCarta.top), size: DIM, font, color: nero
+  });
+
+  const testoTotOggetto = formatoImporto(totaleOggettoRimborso);
+  pagina2.drawText(testoTotOggetto, {
+    x: allineaADestraInColonna(font, testoTotOggetto, DIM, RIMBORSO_TEMPLATE.colonne.IMPORTO_DIPENDENTE),
+    y: pdfLibY(RIMBORSO_TEMPLATE.totali.totOggettoRimborso.top), size: DIM, font, color: nero
+  });
+
+  if (cognomeNome) {
+    pagina2.drawText(cognomeNome, {
+      x: RIMBORSO_TEMPLATE.attestazione.nome.x, y: pdfLibY(RIMBORSO_TEMPLATE.attestazione.nome.top), size: DIM, font: fontBold, color: nero
+    });
+  }
+
+  const firmaBlob = await getFirma(dipendenteAttivo);
+  if (firmaBlob) {
+    const firmaBytes = await firmaBlob.arrayBuffer();
+    const firmaImg = await doc.embedPng(firmaBytes);
+    const f = RIMBORSO_TEMPLATE.attestazione.firma;
+    pagina2.drawImage(firmaImg, {
+      x: f.x,
+      y: RIMBORSO_TEMPLATE.pageHeight - f.top - f.height,
+      width: f.width,
+      height: f.height
+    });
+  }
+
+  const pdfBytes = await doc.save();
+  const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nomeFileExportRimborso(meseAnno);
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 /* =========================================================
@@ -1230,6 +1519,21 @@ el.btnPrevMonthRimborso.addEventListener('click', () => cambiaMeseRimborso(-1));
 el.btnNextMonthRimborso.addEventListener('click', () => cambiaMeseRimborso(1));
 el.btnReopenMonthRimborso.addEventListener('click', riapriMeseRimborso);
 el.btnCloseMonthRimborso.addEventListener('click', chiudiMeseRimborso);
+el.btnExportRimborso.addEventListener('click', () => generaPdfRimborso(stato.meseAttivoRimborso));
+el.btnCaricaFirma.addEventListener('click', () => el.inputFirmaUpload.click());
+el.inputFirmaUpload.addEventListener('change', async () => {
+  const file = el.inputFirmaUpload.files[0];
+  if (file) await gestisciCaricamentoFirma(file);
+  el.inputFirmaUpload.value = '';
+});
+el.btnEliminaFirma.addEventListener('click', async () => {
+  const dipendente = localStorage.getItem('dipendenteAttivo');
+  if (!dipendente) return;
+  const conferma = await chiediConferma(`Eliminare la firma salvata per ${dipendente}?`);
+  if (!conferma) return;
+  await eliminaFirma(dipendente);
+  await aggiornaStatoFirma();
+});
 el.btnAddSpesa.addEventListener('click', apriFormSpesa);
 el.btnSpesaFormAnnulla.addEventListener('click', chiudiFormSpesa);
 el.inputSpesaEsercente.addEventListener('change', onEsercenteChange);

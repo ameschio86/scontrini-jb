@@ -159,19 +159,27 @@
         <strong id="totale-carta">0,00 €</strong>
       </div>
       <div class="rimborso-totale-riga">
-        <span>Pagato dal dipendente</span>
+        <span>Oggetto di rimborso</span>
         <strong id="totale-dipendente">0,00 €</strong>
-      </div>
-      <div class="rimborso-totale-riga">
-        <span>Convenzione</span>
-        <strong id="totale-convenzione">0,00 €</strong>
       </div>
     </div>
 
     <div id="lista-spese" class="lista-spese"></div>
     <p id="lista-spese-empty" class="gallery-empty hidden">Nessuna spesa registrata per questo mese.</p>
 
-    <!-- Export (in arrivo nel prossimo passo) -->
+    <!-- Firma (locale sul dispositivo, mai su GitHub) -->
+    <div class="firma-box">
+      <p id="stato-firma" class="firma-stato">—</p>
+      <div class="firma-azioni">
+        <button id="btn-carica-firma" class="btn-secondary">🖊 Carica/aggiorna firma</button>
+        <button id="btn-elimina-firma" class="btn-secondary hidden">Elimina firma</button>
+      </div>
+      <input type="file" id="input-firma-upload" accept="image/*" class="hidden">
+    </div>
+
+    <!-- Export -->
+    <button id="btn-export-rimborso" class="btn-export">Esporta PDF mese attivo</button>
+
     <button id="btn-close-month-rimborso" class="btn-close-month">Chiudi mese</button>
   </section>
 
@@ -289,6 +297,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
