@@ -1628,6 +1628,10 @@ async function scriviRecordConId(storeName, record) {
 
 async function importaBackupCompleto(file) {
   const testo = await file.text();
+  await ripristinaDaTesto(testo);
+}
+
+async function ripristinaDaTesto(testo) {
   let backup;
   try {
     backup = JSON.parse(testo);

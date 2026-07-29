@@ -652,27 +652,11 @@ body {
 }
 
 /* ---------- Firma ---------- */
-.firma-box {
-  background: var(--bg-light);
-  border-radius: var(--radius);
-  padding: 12px 16px;
-  margin-bottom: 16px;
-}
-
-.firma-stato {
-  margin: 0 0 10px;
-  font-size: 0.85rem;
+.firma-stato-mini {
+  margin: 16px 0 4px;
+  text-align: center;
+  font-size: 0.72rem;
   color: var(--text-muted);
-}
-
-.firma-azioni {
-  display: flex;
-  gap: 10px;
-}
-
-.firma-azioni .btn-secondary {
-  margin-bottom: 0;
-  flex: 1;
 }
 
 /* ---------- Camera view ---------- */

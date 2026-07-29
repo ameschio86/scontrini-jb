@@ -173,20 +173,18 @@
     <div id="lista-spese" class="lista-spese"></div>
     <p id="lista-spese-empty" class="gallery-empty hidden">Nessuna spesa registrata per questo mese.</p>
 
-    <!-- Firma (locale sul dispositivo, mai su GitHub) -->
-    <div class="firma-box">
-      <p id="stato-firma" class="firma-stato">—</p>
-      <div class="firma-azioni">
-        <button id="btn-carica-firma" class="btn-secondary">🖊 Carica/aggiorna firma</button>
-        <button id="btn-elimina-firma" class="btn-secondary hidden">Elimina firma</button>
-      </div>
-      <input type="file" id="input-firma-upload" accept="image/*" class="hidden">
-    </div>
-
     <!-- Export -->
     <button id="btn-export-rimborso" class="btn-export">Esporta PDF mese attivo</button>
 
     <button id="btn-close-month-rimborso" class="btn-close-month">Chiudi mese</button>
+
+    <!-- Firma (locale sul dispositivo, mai su GitHub) -->
+    <p id="stato-firma" class="firma-stato-mini">—</p>
+    <div class="hub-backup">
+      <button id="btn-carica-firma" class="btn-backup-mini">🖊 Carica firma</button>
+      <button id="btn-elimina-firma" class="btn-backup-mini hidden">Elimina firma</button>
+    </div>
+    <input type="file" id="input-firma-upload" accept="image/*" class="hidden">
   </section>
 
   <!-- ===================== VISTA FORM SPESA ===================== -->
