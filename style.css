@@ -100,13 +100,15 @@ body {
 /* ---------- Hub ---------- */
 .hub-view {
   position: relative;
+  padding: 0 16px 12px;
   background-image: radial-gradient(circle, #d7ebff 1px, transparent 1.4px);
   background-size: 18px 18px;
 }
 
 .hub-watermark {
   position: absolute;
-  inset: 0;
+  left: 0;
+  right: 0;
   z-index: 0;
   display: flex;
   align-items: center;
@@ -116,9 +118,10 @@ body {
 }
 
 .hub-watermark img {
-  width: 135%;
+  height: 100%;
+  width: auto;
   max-width: none;
-  opacity: 0.1;
+  opacity: 0.2;
   filter: blur(4px);
 }
 
@@ -147,7 +150,8 @@ body {
   position: relative;
   z-index: 1;
   border-bottom: none;
-  padding-top: 28px;
+  padding: 4px 0;
+  margin-bottom: 4px;
 }
 
 .dipendente-field {
@@ -155,9 +159,9 @@ body {
   z-index: 1;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   max-width: 320px;
-  margin: 0 auto 24px;
+  margin: 0 auto 12px;
 }
 
 .dipendente-field label {
@@ -182,7 +186,7 @@ body {
   z-index: 1;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 8px;
 }
 
 .hub-card {
@@ -190,7 +194,7 @@ body {
   align-items: center;
   gap: 16px;
   border-radius: 14px;
-  padding: 18px 20px;
+  padding: 12px 18px;
   border: none;
   cursor: pointer;
   text-align: left;

@@ -206,6 +206,8 @@ const stato = {
 
 const el = {
   viewHub: document.getElementById('view-hub'),
+  hubWatermark: document.getElementById('hub-watermark'),
+  labelDipendente: document.getElementById('label-dipendente'),
   selectDipendente: document.getElementById('select-dipendente'),
   cardScontrini: document.getElementById('card-scontrini'),
   cardRimborso: document.getElementById('card-rimborso'),
@@ -914,6 +916,20 @@ function inizializzaDipendente() {
   if (salvato) el.selectDipendente.value = salvato;
 }
 
+function dimensionaFiligranaHub() {
+  const contenitoreRect = el.viewHub.getBoundingClientRect();
+  const topRect = el.labelDipendente.getBoundingClientRect();
+  const bottomRect = el.cardAttivita.getBoundingClientRect();
+
+  const top = topRect.top - contenitoreRect.top;
+  const bottom = bottomRect.bottom - contenitoreRect.top;
+
+  el.hubWatermark.style.top = `${top}px`;
+  el.hubWatermark.style.height = `${bottom - top}px`;
+}
+
+window.addEventListener('resize', dimensionaFiligranaHub);
+
 function apriScontrini() {
   el.viewHub.classList.add('hidden');
   el.viewDashboard.classList.remove('hidden');
@@ -939,6 +955,7 @@ el.btnTornaHub.addEventListener('click', tornaAllHub);
 
 async function avvia() {
   inizializzaDipendente();
+  dimensionaFiligranaHub();
   stato.meseAttivo = await determinaMeseAttivoIniziale();
   await aggiornaDashboard();
 }

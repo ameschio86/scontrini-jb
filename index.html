@@ -20,8 +20,8 @@
 
   <!-- ===================== VISTA HUB ===================== -->
   <section id="view-hub" class="view hub-view">
-    <div class="hub-watermark" aria-hidden="true">
-      <img src="icons/icon-512.png" alt="">
+    <div class="hub-watermark" id="hub-watermark" aria-hidden="true">
+      <img src="icons/logo-transparent.png" id="hub-watermark-img" alt="">
     </div>
 
     <div class="hub-swoosh" aria-hidden="true">
@@ -32,12 +32,12 @@
     </div>
 
     <header class="app-header hub-header">
-      <img src="icons/icon-512.png" alt="Logo L&B" class="logo">
+      <img src="icons/logo-transparent.png" alt="Logo L&B" class="logo">
       <h1 class="app-title">L&B Gestionale</h1>
     </header>
 
-    <div class="dipendente-field">
-      <label for="select-dipendente">Dipendente</label>
+    <div class="dipendente-field" id="dipendente-field">
+      <label for="select-dipendente" id="label-dipendente">Dipendente</label>
       <select id="select-dipendente">
         <option value="" disabled selected>— Seleziona —</option>
         <option value="Sebastiano Lovison">Sebastiano Lovison</option>
