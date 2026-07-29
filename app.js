@@ -1684,6 +1684,10 @@ async function avvia() {
   stato.meseAttivo = await determinaMeseAttivoIniziale();
   await aggiornaDashboard();
   stato.meseAttivoRimborso = await determinaMeseAttivoRimborsoIniziale();
+
+  if (navigator.storage && navigator.storage.persist) {
+    navigator.storage.persist().catch(() => {});
+  }
 }
 
 avvia();
