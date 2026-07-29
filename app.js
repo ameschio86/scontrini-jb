@@ -377,6 +377,9 @@ const el = {
   cardScontrini: document.getElementById('card-scontrini'),
   cardRimborso: document.getElementById('card-rimborso'),
   cardAttivita: document.getElementById('card-attivita'),
+  btnEsportaBackup: document.getElementById('btn-esporta-backup'),
+  btnImportaBackup: document.getElementById('btn-importa-backup'),
+  inputImportaBackup: document.getElementById('input-importa-backup'),
   btnTornaHub: document.getElementById('btn-torna-hub'),
 
   viewRimborso: document.getElementById('view-rimborso'),
@@ -1538,6 +1541,151 @@ el.btnAddSpesa.addEventListener('click', apriFormSpesa);
 el.btnSpesaFormAnnulla.addEventListener('click', chiudiFormSpesa);
 el.inputSpesaEsercente.addEventListener('change', onEsercenteChange);
 el.formSpesa.addEventListener('submit', salvaFormSpesa);
+
+/* =========================================================
+   BACKUP COMPLETO (esporta/ripristina tutti i dati)
+   ========================================================= */
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+function base64ToBlob(dataUrl) {
+  const [meta, base64] = dataUrl.split(',');
+  const mime = meta.match(/:(.*?);/)[1];
+  const bin = atob(base64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
+
+async function getTutteLeFirme() {
+  const { store } = await txStore(STORE_FIRME, 'readonly');
+  return reqAsPromise(store.getAll());
+}
+
+async function getTuttiGliStatiMesi() {
+  const { store } = await txStore(STORE_STATO_MESI, 'readonly');
+  return reqAsPromise(store.getAll());
+}
+
+async function getTuttiGliStatiMesiRimborso() {
+  const { store } = await txStore(STORE_STATO_MESI_RIMBORSO, 'readonly');
+  return reqAsPromise(store.getAll());
+}
+
+async function getTutteLeRicevute() {
+  const { store } = await txStore(STORE_RICEVUTE, 'readonly');
+  return reqAsPromise(store.getAll());
+}
+
+async function esportaBackupCompleto() {
+  const [ricevute, statoMesi, spese, statoMesiRimborso, firme] = await Promise.all([
+    getTutteLeRicevute(),
+    getTuttiGliStatiMesi(),
+    getTutteLeSpese(),
+    getTuttiGliStatiMesiRimborso(),
+    getTutteLeFirme()
+  ]);
+
+  const ricevuteSerializzate = await Promise.all(
+    ricevute.map(async (r) => ({ ...r, immagine: await blobToBase64(r.immagine) }))
+  );
+  const firmeSerializzate = await Promise.all(
+    firme.map(async (f) => ({ ...f, immagine: await blobToBase64(f.immagine) }))
+  );
+
+  const backup = {
+    versione: 1,
+    esportatoIl: new Date().toISOString(),
+    dipendenteAttivo: localStorage.getItem('dipendenteAttivo') || null,
+    ricevute: ricevuteSerializzate,
+    statoMesi,
+    spese,
+    statoMesiRimborso,
+    firme: firmeSerializzate
+  };
+
+  const json = JSON.stringify(backup);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `backup_gestionale_lb_${dataOdiernaCompatta()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function scriviRecordConId(storeName, record) {
+  const { store } = await txStore(storeName, 'readwrite');
+  return reqAsPromise(store.put(record));
+}
+
+async function importaBackupCompleto(file) {
+  const testo = await file.text();
+  let backup;
+  try {
+    backup = JSON.parse(testo);
+  } catch (err) {
+    alert('File di backup non valido o corrotto.');
+    return;
+  }
+
+  if (!backup || backup.versione !== 1) {
+    alert('File di backup non riconosciuto.');
+    return;
+  }
+
+  const nRicevute = backup.ricevute?.length || 0;
+  const nSpese = backup.spese?.length || 0;
+  const nFirme = backup.firme?.length || 0;
+  const dataEsportazione = backup.esportatoIl
+    ? new Date(backup.esportatoIl).toLocaleString('it-IT')
+    : 'data sconosciuta';
+
+  const conferma = await chiediConferma(
+    `Ripristinare questo backup (esportato il ${dataEsportazione})? Contiene ${nRicevute} scontrini, ${nSpese} spese e ${nFirme} firme. I dati con lo stesso ID verranno sovrascritti, il resto resta invariato.`
+  );
+  if (!conferma) return;
+
+  for (const r of backup.ricevute || []) {
+    await scriviRecordConId(STORE_RICEVUTE, { ...r, immagine: base64ToBlob(r.immagine) });
+  }
+  for (const s of backup.statoMesi || []) {
+    await scriviRecordConId(STORE_STATO_MESI, s);
+  }
+  for (const s of backup.spese || []) {
+    await scriviRecordConId(STORE_SPESE, s);
+  }
+  for (const s of backup.statoMesiRimborso || []) {
+    await scriviRecordConId(STORE_STATO_MESI_RIMBORSO, s);
+  }
+  for (const f of backup.firme || []) {
+    await scriviRecordConId(STORE_FIRME, { ...f, immagine: base64ToBlob(f.immagine) });
+  }
+  if (backup.dipendenteAttivo) {
+    localStorage.setItem('dipendenteAttivo', backup.dipendenteAttivo);
+    inizializzaDipendente();
+  }
+
+  alert('Ripristino completato.');
+  stato.meseAttivo = await determinaMeseAttivoIniziale();
+  await aggiornaDashboard();
+  stato.meseAttivoRimborso = await determinaMeseAttivoRimborsoIniziale();
+}
+
+el.btnEsportaBackup.addEventListener('click', esportaBackupCompleto);
+el.btnImportaBackup.addEventListener('click', () => el.inputImportaBackup.click());
+el.inputImportaBackup.addEventListener('change', async () => {
+  const file = el.inputImportaBackup.files[0];
+  if (file) await importaBackupCompleto(file);
+  el.inputImportaBackup.value = '';
+});
 
 /* =========================================================
    AVVIO APP
