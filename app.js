@@ -370,6 +370,7 @@ const stato = {
    ========================================================= */
 
 const el = {
+  splashScreen: document.getElementById('splash-screen'),
   viewHub: document.getElementById('view-hub'),
   selectDipendente: document.getElementById('select-dipendente'),
   cardScontrini: document.getElementById('card-scontrini'),
@@ -1738,6 +1739,11 @@ async function avvia() {
 }
 
 avvia();
+
+setTimeout(() => {
+  el.splashScreen.classList.add('splash-nascosto');
+  setTimeout(() => el.splashScreen.classList.add('hidden'), 400);
+}, 2500);
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
