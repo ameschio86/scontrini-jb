@@ -40,9 +40,20 @@
       <label for="select-dipendente" id="label-dipendente">Dipendente</label>
       <select id="select-dipendente">
         <option value="" disabled selected>— Seleziona —</option>
-        <option value="Sebastiano Lovison">Sebastiano Lovison</option>
+        <option value="Alberto Bellato">Alberto Bellato</option>
         <option value="Paolo Benà">Paolo Benà</option>
+        <option value="Patrizia Casotto">Patrizia Casotto</option>
+        <option value="Mattia Cavestro">Mattia Cavestro</option>
+        <option value="Andrea De Cecco">Andrea De Cecco</option>
+        <option value="Antonino Ferrante">Antonino Ferrante</option>
+        <option value="Tiziano Garbin">Tiziano Garbin</option>
+        <option value="Eddy Giacometti">Eddy Giacometti</option>
+        <option value="Sebastiano Lovison">Sebastiano Lovison</option>
         <option value="Alessandro Meschiari">Alessandro Meschiari</option>
+        <option value="Michele Miotto">Michele Miotto</option>
+        <option value="Giorgia Mori">Giorgia Mori</option>
+        <option value="Marco Andrea Tonello">Marco Andrea Tonello</option>
+        <option value="Simone Vianello">Simone Vianello</option>
       </select>
     </div>
 
@@ -73,7 +84,30 @@
     <div class="hub-backup">
       <button id="btn-esporta-backup" class="btn-backup-mini">💾 Backup</button>
       <button id="btn-importa-backup" class="btn-backup-mini">📂 Ripristina</button>
+      <button id="btn-dati-fatturazione" class="btn-backup-mini">🧾 Dati fatturazione</button>
       <input type="file" id="input-importa-backup" accept="application/json" class="hidden">
+    </div>
+  </section>
+
+  <!-- ===================== VISTA DATI FATTURAZIONE ===================== -->
+  <section id="view-fatturazione" class="view hidden fatturazione-view">
+    <header class="app-header">
+      <button id="btn-torna-hub-fatturazione" class="btn-back" aria-label="Torna all'hub">← <span class="btn-back-label">BACK</span></button>
+    </header>
+
+    <img src="icons/icon-512.png" alt="Logo L&B" class="fatturazione-logo">
+
+    <div class="fatturazione-dati">
+      <p class="fatturazione-azienda">LIVING &amp; BUILDING</p>
+      <p>Studio tecnico associato di Lovison S. &amp; Benà P.</p>
+      <p>Via Lisbona, 28/A – 35127 Padova (PD)</p>
+      <p>Tel. 049.5819370</p>
+      <p>SDI: T9K4ZHO</p>
+      <p>Partita IVA: 04200830281</p>
+    </div>
+
+    <div class="fatturazione-qr">
+      <img src="icons/qr-fatturazione.png" alt="QR code contatti fatturazione" id="img-qr-fatturazione">
     </div>
   </section>
 

@@ -378,6 +378,10 @@ const el = {
   btnEsportaBackup: document.getElementById('btn-esporta-backup'),
   btnImportaBackup: document.getElementById('btn-importa-backup'),
   inputImportaBackup: document.getElementById('input-importa-backup'),
+  btnDatiFatturazione: document.getElementById('btn-dati-fatturazione'),
+  viewFatturazione: document.getElementById('view-fatturazione'),
+  btnTornaHubFatturazione: document.getElementById('btn-torna-hub-fatturazione'),
+  imgQrFatturazione: document.getElementById('img-qr-fatturazione'),
   btnTornaHub: document.getElementById('btn-torna-hub'),
 
   viewRimborso: document.getElementById('view-rimborso'),
@@ -1122,6 +1126,24 @@ function tornaAllHub() {
   el.viewHub.classList.remove('hidden');
 }
 
+function apriFatturazione() {
+  el.viewHub.classList.add('hidden');
+  el.viewFatturazione.classList.remove('hidden');
+}
+
+function tornaAllHubDaFatturazione() {
+  el.viewFatturazione.classList.add('hidden');
+  el.viewHub.classList.remove('hidden');
+}
+
+function verificaQrFatturazione() {
+  if (el.imgQrFatturazione.complete && el.imgQrFatturazione.naturalWidth === 0) {
+    el.imgQrFatturazione.closest('.fatturazione-qr').classList.add('hidden');
+  }
+}
+el.imgQrFatturazione.addEventListener('error', verificaQrFatturazione);
+verificaQrFatturazione();
+
 el.selectDipendente.addEventListener('change', () => {
   localStorage.setItem('dipendenteAttivo', el.selectDipendente.value);
 });
@@ -1130,6 +1152,8 @@ el.cardScontrini.addEventListener('click', apriScontrini);
 el.cardRimborso.addEventListener('click', apriRimborso);
 el.cardAttivita.addEventListener('click', () => alert('Modulo in costruzione'));
 el.btnTornaHub.addEventListener('click', tornaAllHub);
+el.btnDatiFatturazione.addEventListener('click', apriFatturazione);
+el.btnTornaHubFatturazione.addEventListener('click', tornaAllHubDaFatturazione);
 
 /* =========================================================
    RIMBORSO
@@ -1305,6 +1329,24 @@ function allineaADestraInColonna(font, testo, dimensione, colonna, margineDestro
   return colonna[1] - margineDestro - larghezza;
 }
 
+function suddividiTestoInRighe(font, testo, dimensione, larghezzaMax) {
+  const parole = testo.split(/\s+/).filter(Boolean);
+  const righe = [];
+  let rigaCorrente = '';
+
+  for (const parola of parole) {
+    const prova = rigaCorrente ? `${rigaCorrente} ${parola}` : parola;
+    if (font.widthOfTextAtSize(prova, dimensione) <= larghezzaMax || !rigaCorrente) {
+      rigaCorrente = prova;
+    } else {
+      righe.push(rigaCorrente);
+      rigaCorrente = parola;
+    }
+  }
+  if (rigaCorrente) righe.push(rigaCorrente);
+  return righe;
+}
+
 function nomeFileExportRimborso(meseAnno) {
   const { mese } = scomponiMeseAnno(meseAnno);
   const nomeMese = MESI_IT[mese - 1];
@@ -1380,7 +1422,12 @@ async function generaPdfRimborso(meseAnno) {
     page.drawText(importoFormattato, { x: allineaADestraInColonna(font, importoFormattato, DIM, colonnaImporto), y, size: DIM, font, color: nero });
 
     if (spesa.note) {
-      page.drawText(spesa.note.toUpperCase(), { x: c.NOTE[0] + 3, y, size: DIM, font, color: nero });
+      const DIM_NOTE = 6;
+      const larghezzaNote = c.NOTE[1] - c.NOTE[0] - 6;
+      const righeNote = suddividiTestoInRighe(font, spesa.note.toUpperCase(), DIM_NOTE, larghezzaNote).slice(0, 2);
+      righeNote.forEach((riga, i) => {
+        page.drawText(riga, { x: c.NOTE[0] + 3, y: y - i * (DIM_NOTE + 1), size: DIM_NOTE, font, color: nero });
+      });
     }
   }
 

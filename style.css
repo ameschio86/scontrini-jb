@@ -677,6 +677,71 @@ body {
   color: var(--text-muted);
 }
 
+/* ---------- Dati fatturazione ---------- */
+.fatturazione-view {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  max-width: none;
+  background: var(--bg-white);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 20px calc(20px + env(safe-area-inset-bottom));
+  overflow-y: auto;
+}
+
+.fatturazione-view .app-header {
+  align-self: stretch;
+  border-bottom: none;
+  padding: calc(12px + env(safe-area-inset-top)) 0 4px;
+  margin-bottom: 0;
+}
+
+.fatturazione-view .btn-back {
+  padding: 4px 0;
+}
+
+.fatturazione-logo {
+  width: 170px;
+  height: auto;
+  margin: 16px 0 28px;
+}
+
+.fatturazione-dati {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.fatturazione-dati p {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-dark);
+  margin: 8px 0;
+  line-height: 1.4;
+}
+
+.fatturazione-azienda {
+  font-size: 1.9rem;
+  font-weight: 800;
+  color: var(--primary-blue-dark);
+  margin-bottom: 14px !important;
+  letter-spacing: 0.02em;
+}
+
+.fatturazione-qr {
+  margin-top: auto;
+  padding: 16px 0;
+  display: flex;
+  justify-content: center;
+}
+
+.fatturazione-qr img {
+  width: 240px;
+  max-width: 65vw;
+  height: auto;
+}
+
 /* ---------- Camera view ---------- */
 .camera-view {
   position: fixed;
