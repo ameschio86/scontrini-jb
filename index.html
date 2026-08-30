@@ -62,6 +62,13 @@
     </div>
 
     <div class="hub-cards">
+      <button id="card-attivita" class="hub-card hub-card-attivo">
+        <span class="hub-card-icon">📋</span>
+        <span class="hub-card-text">
+          <span class="hub-card-title">Attività e presenze</span>
+          <span class="hub-card-subtitle">Report giornaliero cantieri</span>
+        </span>
+      </button>
       <button id="card-scontrini" class="hub-card hub-card-attivo">
         <span class="hub-card-icon">📷</span>
         <span class="hub-card-text">
@@ -74,13 +81,6 @@
         <span class="hub-card-text">
           <span class="hub-card-title">Rimborso</span>
           <span class="hub-card-subtitle">Registro spese mensile</span>
-        </span>
-      </button>
-      <button id="card-attivita" class="hub-card hub-card-attivo">
-        <span class="hub-card-icon">📋</span>
-        <span class="hub-card-text">
-          <span class="hub-card-title">Attività</span>
-          <span class="hub-card-subtitle">Report giornaliero cantieri</span>
         </span>
       </button>
     </div>
@@ -304,6 +304,8 @@
 
     <div class="hub-backup">
       <button id="btn-apri-anagrafica" class="btn-backup-mini">🗂 Anagrafica clienti/cantieri</button>
+      <button id="btn-importa-attivita" class="btn-backup-mini">📥 Importa attività da file</button>
+      <input type="file" id="input-importa-attivita" accept="application/json" class="hidden">
     </div>
   </section>
 

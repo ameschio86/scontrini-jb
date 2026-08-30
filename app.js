@@ -490,6 +490,8 @@ const el = {
   btnExportAttivita: document.getElementById('btn-export-attivita'),
   btnCloseMonthAttivita: document.getElementById('btn-close-month-attivita'),
   btnApriAnagrafica: document.getElementById('btn-apri-anagrafica'),
+  btnImportaAttivita: document.getElementById('btn-importa-attivita'),
+  inputImportaAttivita: document.getElementById('input-importa-attivita'),
 
   viewAnagrafica: document.getElementById('view-attivita-anagrafica'),
   btnAnagraficaAnnulla: document.getElementById('btn-anagrafica-annulla'),
@@ -1631,6 +1633,62 @@ function abilitaDettatura(input, btnMic) {
   });
 }
 
+function recordGiornoValido(r) {
+  return r && typeof r === 'object' &&
+    typeof r.dipendente === 'string' && r.dipendente &&
+    typeof r.meseAnno === 'string' &&
+    typeof r.data === 'string' &&
+    typeof r.tipoGiorno === 'string' &&
+    Array.isArray(r.righe);
+}
+
+async function importaAttivitaDaFile(file) {
+  let record;
+  try {
+    const testo = await file.text();
+    record = JSON.parse(testo);
+  } catch (e) {
+    alert('File non valido: non è un JSON leggibile.');
+    return;
+  }
+  if (!Array.isArray(record) || record.length === 0 || !record.every(recordGiornoValido)) {
+    alert('File non valido: non contiene un elenco di giornate nel formato atteso.');
+    return;
+  }
+
+  const dipendenteFile = record[0].dipendente;
+  const dipendenteAttivo = localStorage.getItem('dipendenteAttivo');
+  const date = [...record].map(r => r.data).sort();
+  const primaData = parseDataISO(date[0]).toLocaleDateString('it-IT');
+  const ultimaData = parseDataISO(date[date.length - 1]).toLocaleDateString('it-IT');
+
+  let messaggio = `Importare ${record.length} giornate per ${dipendenteFile} (dal ${primaData} al ${ultimaData})? Verranno aggiunte solo alle Attività: Rimborsi e Scontrini non vengono toccati.`;
+  if (dipendenteFile !== dipendenteAttivo) {
+    messaggio += `\n\nAttenzione: il dipendente attualmente selezionato è "${dipendenteAttivo}", diverso da quello nel file.`;
+  }
+
+  const mesiCoinvolti = [...new Set(record.map(r => r.meseAnno))];
+  const esistentiPerMese = await Promise.all(mesiCoinvolti.map(mese => getGiorniAttivitaDelMese(mese, dipendenteFile)));
+  const dateEsistenti = new Set(esistentiPerMese.flat().map(g => g.data));
+  const sovrapposizioni = record.filter(r => dateEsistenti.has(r.data)).length;
+  if (sovrapposizioni > 0) {
+    messaggio += `\n\nAttenzione: ${sovrapposizioni} di queste giornate esistono già e verrebbero duplicate.`;
+  }
+
+  const procedi = await chiediConferma(messaggio);
+  if (!procedi) return;
+
+  for (const r of record) {
+    const { id, ...senzaId } = r;
+    await salvaGiornoAttivita(senzaId);
+  }
+
+  alert(`Importazione completata: ${record.length} giornate aggiunte.`);
+  if (dipendenteFile === dipendenteAttivo) {
+    await aggiornaAttivita();
+  }
+}
+
 /* =========================================================
    ATTIVITÀ — form nuova giornata
    ========================================================= */
@@ -2116,6 +2174,12 @@ el.btnReopenMonthAttivita.addEventListener('click', riapriMeseAttivita);
 el.btnCloseMonthAttivita.addEventListener('click', chiudiMeseAttivita);
 el.btnAddGiorno.addEventListener('click', apriGiornoForm);
 el.btnApriAnagrafica.addEventListener('click', apriAnagrafica);
+el.btnImportaAttivita.addEventListener('click', () => el.inputImportaAttivita.click());
+el.inputImportaAttivita.addEventListener('change', async () => {
+  const file = el.inputImportaAttivita.files[0];
+  if (file) await importaAttivitaDaFile(file);
+  el.inputImportaAttivita.value = '';
+});
 el.btnExportAttivita.addEventListener('click', async () => {
   const dipendente = localStorage.getItem('dipendenteAttivo');
   const giorni = await getGiorniAttivitaDelMese(stato.meseAttivoAttivita, dipendente);
@@ -2861,13 +2925,31 @@ async function getTutteLeRicevute() {
   return reqAsPromise(store.getAll());
 }
 
+async function getTutteLeAnagraficheAttivita() {
+  const { store } = await txStore(STORE_ANAGRAFICA_ATTIVITA, 'readonly');
+  return reqAsPromise(store.getAll());
+}
+
+async function getTuttiIGiorniAttivitaCompleto() {
+  const { store } = await txStore(STORE_ATTIVITA_GIORNI, 'readonly');
+  return reqAsPromise(store.getAll());
+}
+
+async function getTuttiGliStatiMesiAttivita() {
+  const { store } = await txStore(STORE_STATO_MESI_ATTIVITA, 'readonly');
+  return reqAsPromise(store.getAll());
+}
+
 async function esportaBackupCompleto() {
-  const [ricevute, statoMesi, spese, statoMesiRimborso, firme] = await Promise.all([
+  const [ricevute, statoMesi, spese, statoMesiRimborso, firme, anagraficheAttivita, giorniAttivita, statoMesiAttivita] = await Promise.all([
     getTutteLeRicevute(),
     getTuttiGliStatiMesi(),
     getTutteLeSpese(),
     getTuttiGliStatiMesiRimborso(),
-    getTutteLeFirme()
+    getTutteLeFirme(),
+    getTutteLeAnagraficheAttivita(),
+    getTuttiIGiorniAttivitaCompleto(),
+    getTuttiGliStatiMesiAttivita()
   ]);
 
   const ricevuteSerializzate = await Promise.all(
@@ -2885,7 +2967,10 @@ async function esportaBackupCompleto() {
     statoMesi,
     spese,
     statoMesiRimborso,
-    firme: firmeSerializzate
+    firme: firmeSerializzate,
+    anagraficheAttivita,
+    giorniAttivita,
+    statoMesiAttivita
   };
 
   const json = JSON.stringify(backup);
@@ -2925,12 +3010,13 @@ async function ripristinaDaTesto(testo) {
   const nRicevute = backup.ricevute?.length || 0;
   const nSpese = backup.spese?.length || 0;
   const nFirme = backup.firme?.length || 0;
+  const nGiorniAttivita = backup.giorniAttivita?.length || 0;
   const dataEsportazione = backup.esportatoIl
     ? new Date(backup.esportatoIl).toLocaleString('it-IT')
     : 'data sconosciuta';
 
   const conferma = await chiediConferma(
-    `Ripristinare questo backup (esportato il ${dataEsportazione})? Contiene ${nRicevute} scontrini, ${nSpese} spese e ${nFirme} firme. I dati con lo stesso ID verranno sovrascritti, il resto resta invariato.`
+    `Ripristinare questo backup (esportato il ${dataEsportazione})? Contiene ${nRicevute} scontrini, ${nSpese} spese, ${nGiorniAttivita} giornate attività e ${nFirme} firme. I dati con lo stesso ID verranno sovrascritti, il resto resta invariato.`
   );
   if (!conferma) return;
 
@@ -2949,6 +3035,15 @@ async function ripristinaDaTesto(testo) {
   for (const f of backup.firme || []) {
     await scriviRecordConId(STORE_FIRME, { ...f, immagine: base64ToBlob(f.immagine) });
   }
+  for (const a of backup.anagraficheAttivita || []) {
+    await scriviRecordConId(STORE_ANAGRAFICA_ATTIVITA, a);
+  }
+  for (const g of backup.giorniAttivita || []) {
+    await scriviRecordConId(STORE_ATTIVITA_GIORNI, g);
+  }
+  for (const s of backup.statoMesiAttivita || []) {
+    await scriviRecordConId(STORE_STATO_MESI_ATTIVITA, s);
+  }
   if (backup.dipendenteAttivo) {
     localStorage.setItem('dipendenteAttivo', backup.dipendenteAttivo);
     inizializzaDipendente();
@@ -2958,6 +3053,7 @@ async function ripristinaDaTesto(testo) {
   stato.meseAttivo = await determinaMeseAttivoIniziale();
   await aggiornaDashboard();
   stato.meseAttivoRimborso = await determinaMeseAttivoRimborsoIniziale();
+  stato.meseAttivoAttivita = await determinaMeseAttivoAttivitaIniziale(localStorage.getItem('dipendenteAttivo'));
 }
 
 el.btnEsportaBackup.addEventListener('click', esportaBackupCompleto);
