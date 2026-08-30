@@ -649,10 +649,92 @@ body {
   flex-shrink: 0;
 }
 
+.giorno-item {
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: var(--bg-white);
+  overflow: hidden;
+}
+
+.giorno-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  cursor: pointer;
+}
+
+.giorno-item-dettaglio-espanso {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 14px 14px;
+  border-top: 1px solid var(--border-light);
+}
+
+.giorno-riga-dettaglio {
+  font-size: 0.85rem;
+  color: var(--text-dark);
+}
+
+.giorno-riga-dettaglio strong {
+  color: var(--primary-blue-dark);
+}
+
+.btn-elimina-giorno {
+  display: block;
+  width: 100%;
+  background: var(--danger);
+  color: white;
+  border: none;
+  font-weight: 700;
+  padding: 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  margin-top: 4px;
+}
+
 .spesa-form {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.campo-con-microfono {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.campo-con-microfono input {
+  flex: 1;
+  min-width: 0;
+}
+
+.btn-microfono {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--border-light);
+  background: var(--bg-white);
+  font-size: 1.1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-microfono.mic-attivo {
+  background: var(--danger);
+  border-color: var(--danger);
+  animation: pulsazione-mic 1s infinite;
+}
+
+@keyframes pulsazione-mic {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
 }
 
 .campo-label {
@@ -664,13 +746,15 @@ body {
   color: var(--text-muted);
 }
 
-.campo-label input {
+.campo-label input,
+.campo-label select {
   border: 1px solid var(--border-light);
   border-radius: 10px;
   padding: 12px;
   font-size: 1rem;
   font-family: inherit;
   color: var(--text-dark);
+  background: var(--bg-white);
 }
 
 .campo-fieldset {
@@ -707,6 +791,130 @@ body {
   margin: 16px 0 4px;
   text-align: center;
   font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+/* ---------- Attività: anagrafica ---------- */
+.campo-riga-doppia {
+  display: flex;
+  gap: 12px;
+}
+
+.campo-riga-doppia .campo-label {
+  flex: 1;
+}
+
+.campo-nota {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-top: -8px;
+}
+
+.lista-clienti-anagrafica {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 16px 0;
+}
+
+.anagrafica-cliente {
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: var(--bg-light);
+}
+
+.anagrafica-cliente-nome {
+  width: 100%;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 1rem;
+  font-weight: 700;
+  font-family: inherit;
+  color: var(--text-dark);
+  margin-bottom: 10px;
+}
+
+.anagrafica-sottoclienti {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.anagrafica-sottocliente {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--bg-white);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.anagrafica-sottocliente input {
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.9rem;
+  font-family: inherit;
+  color: var(--text-dark);
+}
+
+.anagrafica-riga-azioni {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.btn-rimuovi-mini {
+  background: none;
+  border: none;
+  color: var(--danger);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 6px;
+}
+
+.btn-testo-mini {
+  background: none;
+  border: none;
+  color: var(--primary-blue);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 6px;
+}
+
+.anagrafica-cliente-azioni {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* ---------- Attività: tappe giornata ---------- */
+.tappa-blocco {
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  padding: 12px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--bg-light);
+}
+
+.tappa-blocco .campo-label {
+  gap: 4px;
+}
+
+.tappa-titolo-riga {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.8rem;
+  font-weight: 700;
   color: var(--text-muted);
 }
 

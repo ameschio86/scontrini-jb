@@ -5,12 +5,16 @@
    ========================================================= */
 
 const DB_NAME = 'ScontriniDB';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const STORE_RICEVUTE = 'ricevute';
 const STORE_STATO_MESI = 'statoMesi';
 const STORE_SPESE = 'spese';
 const STORE_STATO_MESI_RIMBORSO = 'statoMesiRimborso';
 const STORE_FIRME = 'firme';
+const STORE_ANAGRAFICA_ATTIVITA = 'anagraficaAttivita';
+const STORE_ATTIVITA_GIORNI = 'attivitaGiorni';
+const STORE_STATO_MESI_ATTIVITA = 'statoMesiAttivita';
+const CLIENTE_PERMESSO = '__PERMESSO__';
 const MAX_LATO_LUNGO = 2200;
 const JPEG_QUALITY = 0.85;
 
@@ -112,6 +116,16 @@ function apriDB() {
       }
       if (!db.objectStoreNames.contains(STORE_FIRME)) {
         db.createObjectStore(STORE_FIRME, { keyPath: 'dipendente' });
+      }
+      if (!db.objectStoreNames.contains(STORE_ANAGRAFICA_ATTIVITA)) {
+        db.createObjectStore(STORE_ANAGRAFICA_ATTIVITA, { keyPath: 'dipendente' });
+      }
+      if (!db.objectStoreNames.contains(STORE_ATTIVITA_GIORNI)) {
+        const storeGiorni = db.createObjectStore(STORE_ATTIVITA_GIORNI, { keyPath: 'id', autoIncrement: true });
+        storeGiorni.createIndex('meseAnno', 'meseAnno', { unique: false });
+      }
+      if (!db.objectStoreNames.contains(STORE_STATO_MESI_ATTIVITA)) {
+        db.createObjectStore(STORE_STATO_MESI_ATTIVITA, { keyPath: 'meseAnno' });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -221,6 +235,88 @@ async function determinaMeseAttivoRimborsoIniziale() {
 
   const conteggi = new Map();
   for (const s of tutteSpese) conteggi.set(s.meseAnno, (conteggi.get(s.meseAnno) || 0) + 1);
+  const statiMap = new Map(statiDb.map(s => [s.meseAnno, s]));
+
+  const precedentiAperti = [...conteggi.keys()]
+    .filter(m => m < correnteMese && !statiMap.get(m)?.chiuso && conteggi.get(m) > 0)
+    .sort();
+
+  return precedentiAperti.length > 0 ? precedentiAperti[0] : correnteMese;
+}
+
+/* =========================================================
+   ATTIVITÀ — anagrafica clienti/cantieri e giorni
+   ========================================================= */
+
+function suggerisciSiglaTC(nomeCognome) {
+  if (!nomeCognome) return '';
+  const invertito = invertiNomeCognome(nomeCognome);
+  const parti = invertito.split(/\s+/).filter(Boolean);
+  const iniziali = parti.map(p => p[0]).join('');
+  return iniziali.slice(0, 2).toUpperCase();
+}
+
+async function getAnagraficaAttivita(dipendente) {
+  if (!dipendente) return null;
+  const { store } = await txStore(STORE_ANAGRAFICA_ATTIVITA, 'readonly');
+  const result = await reqAsPromise(store.get(dipendente));
+  return result || { dipendente, tc: suggerisciSiglaTC(dipendente), orarioInizio: '08:00', orarioFine: '17:00', clienti: [] };
+}
+
+async function salvaAnagraficaAttivita(record) {
+  const { store } = await txStore(STORE_ANAGRAFICA_ATTIVITA, 'readwrite');
+  return reqAsPromise(store.put(record));
+}
+
+async function salvaGiornoAttivita(record) {
+  const { store } = await txStore(STORE_ATTIVITA_GIORNI, 'readwrite');
+  return reqAsPromise(store.put(record));
+}
+
+async function eliminaGiornoAttivita(id) {
+  const { store } = await txStore(STORE_ATTIVITA_GIORNI, 'readwrite');
+  return reqAsPromise(store.delete(id));
+}
+
+async function getGiorniAttivitaDelMese(meseAnno, dipendente) {
+  const { store } = await txStore(STORE_ATTIVITA_GIORNI, 'readonly');
+  const idx = store.index('meseAnno');
+  const result = await reqAsPromise(idx.getAll(meseAnno));
+  return result
+    .filter(g => g.dipendente === dipendente)
+    .sort((a, b) => a.data.localeCompare(b.data) || a.id - b.id);
+}
+
+async function getTuttiIGiorniAttivita(dipendente) {
+  const { store } = await txStore(STORE_ATTIVITA_GIORNI, 'readonly');
+  const result = await reqAsPromise(store.getAll());
+  return result.filter(g => g.dipendente === dipendente);
+}
+
+async function getStatoMeseAttivita(meseAnno) {
+  const { store } = await txStore(STORE_STATO_MESI_ATTIVITA, 'readonly');
+  const result = await reqAsPromise(store.get(meseAnno));
+  return result || { meseAnno, chiuso: false, dataChiusura: null };
+}
+
+async function setStatoMeseAttivita(meseAnno, chiuso) {
+  const { store } = await txStore(STORE_STATO_MESI_ATTIVITA, 'readwrite');
+  const record = { meseAnno, chiuso, dataChiusura: chiuso ? new Date().toISOString() : null };
+  return reqAsPromise(store.put(record));
+}
+
+async function determinaMeseAttivoAttivitaIniziale(dipendente) {
+  const correnteMese = meseAnnoCorrente();
+  const [tuttiGiorni, statiDb] = await Promise.all([
+    getTuttiIGiorniAttivita(dipendente),
+    (async () => {
+      const { store } = await txStore(STORE_STATO_MESI_ATTIVITA, 'readonly');
+      return reqAsPromise(store.getAll());
+    })()
+  ]);
+
+  const conteggi = new Map();
+  for (const g of tuttiGiorni) conteggi.set(g.meseAnno, (conteggi.get(g.meseAnno) || 0) + 1);
   const statiMap = new Map(statiDb.map(s => [s.meseAnno, s]));
 
   const precedentiAperti = [...conteggi.keys()]
@@ -362,7 +458,11 @@ const stato = {
   fotoGrezza: null,
   angoli: null,
   angoloTrascinato: null,
-  meseAttivoRimborso: meseAnnoCorrente()
+  meseAttivoRimborso: meseAnnoCorrente(),
+  meseAttivoAttivita: meseAnnoCorrente(),
+  anagraficaClienti: [],
+  anagraficaCorrente: null,
+  tappeCounter: 0
 };
 
 /* =========================================================
@@ -376,6 +476,49 @@ const el = {
   cardScontrini: document.getElementById('card-scontrini'),
   cardRimborso: document.getElementById('card-rimborso'),
   cardAttivita: document.getElementById('card-attivita'),
+
+  viewAttivita: document.getElementById('view-attivita'),
+  btnTornaHubAttivita: document.getElementById('btn-torna-hub-attivita'),
+  btnPrevMonthAttivita: document.getElementById('btn-prev-month-attivita'),
+  btnNextMonthAttivita: document.getElementById('btn-next-month-attivita'),
+  monthLabelAttivita: document.getElementById('month-label-attivita'),
+  monthClosedBadgeAttivita: document.getElementById('month-closed-badge-attivita'),
+  btnReopenMonthAttivita: document.getElementById('btn-reopen-month-attivita'),
+  btnAddGiorno: document.getElementById('btn-add-giorno'),
+  listaGiorniAttivita: document.getElementById('lista-giorni-attivita'),
+  listaGiorniAttivitaEmpty: document.getElementById('lista-giorni-attivita-empty'),
+  btnExportAttivita: document.getElementById('btn-export-attivita'),
+  btnCloseMonthAttivita: document.getElementById('btn-close-month-attivita'),
+  btnApriAnagrafica: document.getElementById('btn-apri-anagrafica'),
+
+  viewAnagrafica: document.getElementById('view-attivita-anagrafica'),
+  btnAnagraficaAnnulla: document.getElementById('btn-anagrafica-annulla'),
+  inputTC: document.getElementById('input-tc'),
+  inputOrarioInizio: document.getElementById('input-orario-inizio'),
+  inputOrarioFine: document.getElementById('input-orario-fine'),
+  listaClientiAnagrafica: document.getElementById('lista-clienti-anagrafica'),
+  btnAggiungiCliente: document.getElementById('btn-aggiungi-cliente'),
+  btnSalvaAnagrafica: document.getElementById('btn-salva-anagrafica'),
+
+  viewGiornoForm: document.getElementById('view-giorno-form'),
+  btnGiornoFormAnnulla: document.getElementById('btn-giorno-form-annulla'),
+  formGiorno: document.getElementById('form-giorno'),
+  inputGiornoData: document.getElementById('input-giorno-data'),
+  bloccoFerie: document.getElementById('blocco-ferie'),
+  inputFerieLuogo: document.getElementById('input-ferie-luogo'),
+  bloccoMalattia: document.getElementById('blocco-malattia'),
+  inputMalattiaNote: document.getElementById('input-malattia-note'),
+  bloccoInfortunio: document.getElementById('blocco-infortunio'),
+  inputInfortunioNote: document.getElementById('input-infortunio-note'),
+  bloccoSmart: document.getElementById('blocco-smart'),
+  selectSmartCliente: document.getElementById('select-smart-cliente'),
+  inputSmartNote: document.getElementById('input-smart-note'),
+  btnMicSmartNote: document.getElementById('btn-mic-smart-note'),
+  bloccoNormale: document.getElementById('blocco-normale'),
+  listaTappe: document.getElementById('lista-tappe'),
+  btnAggiungiTappa: document.getElementById('btn-aggiungi-tappa'),
+  avvisoMultiCliente: document.getElementById('avviso-multi-cliente'),
+
   btnEsportaBackup: document.getElementById('btn-esporta-backup'),
   btnImportaBackup: document.getElementById('btn-importa-backup'),
   inputImportaBackup: document.getElementById('input-importa-backup'),
@@ -1145,16 +1288,861 @@ function verificaQrFatturazione() {
 el.imgQrFatturazione.addEventListener('error', verificaQrFatturazione);
 verificaQrFatturazione();
 
-el.selectDipendente.addEventListener('change', () => {
+/* =========================================================
+   ATTIVITÀ — navigazione e rendering
+   ========================================================= */
+
+async function apriAttivita() {
+  el.viewHub.classList.add('hidden');
+  el.viewAttivita.classList.remove('hidden');
+  await aggiornaAttivita();
+}
+
+function tornaAllHubDaAttivita() {
+  el.viewAttivita.classList.add('hidden');
+  el.viewHub.classList.remove('hidden');
+}
+
+async function cambiaMeseAttivita(delta) {
+  stato.meseAttivoAttivita = aggiungiMesi(stato.meseAttivoAttivita, delta);
+  await aggiornaAttivita();
+}
+
+async function aggiornaAttivita() {
+  const dipendente = localStorage.getItem('dipendenteAttivo');
+  el.monthLabelAttivita.textContent = etichettaMese(stato.meseAttivoAttivita);
+
+  const [statoMese, giorni] = await Promise.all([
+    getStatoMeseAttivita(stato.meseAttivoAttivita),
+    getGiorniAttivitaDelMese(stato.meseAttivoAttivita, dipendente)
+  ]);
+
+  const chiuso = statoMese.chiuso;
+  el.monthClosedBadgeAttivita.classList.toggle('hidden', !chiuso);
+  el.btnAddGiorno.disabled = chiuso;
+  el.btnReopenMonthAttivita.classList.toggle('hidden', !chiuso);
+
+  renderListaGiorniAttivita(giorni);
+}
+
+function renderListaGiorniAttivita(giorni) {
+  el.listaGiorniAttivita.innerHTML = '';
+  el.listaGiorniAttivitaEmpty.classList.toggle('hidden', giorni.length > 0);
+
+  for (const g of giorni) {
+    const item = document.createElement('div');
+    item.className = 'giorno-item';
+
+    const header = document.createElement('div');
+    header.className = 'giorno-item-header';
+
+    const info = document.createElement('div');
+    info.className = 'spesa-item-info';
+
+    const dataFormattata = parseDataISO(g.data).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const etichettaTipo = g.tipoGiorno === 'ferie' ? 'Ferie'
+      : g.tipoGiorno === 'malattia' ? 'Malattia'
+      : g.tipoGiorno === 'infortunio' ? 'Infortunio'
+      : g.tipoGiorno === 'smart' ? 'Smart working'
+      : `${g.righe.length} ${g.righe.length === 1 ? 'tappa' : 'tappe'}`;
+
+    const titolo = document.createElement('span');
+    titolo.className = 'spesa-item-titolo';
+    titolo.textContent = `${dataFormattata} · ${etichettaTipo}`;
+    info.appendChild(titolo);
+
+    const dettaglio = document.createElement('span');
+    dettaglio.className = 'spesa-item-dettaglio';
+    const clientiElencati = [...new Set(g.righe.map(r => r.cliente).filter(Boolean))].join(', ');
+    dettaglio.textContent = clientiElencati || (g.righe[0] ? g.righe[0].note : '');
+    info.appendChild(dettaglio);
+
+    header.appendChild(info);
+
+    if (g.multiClienteNonRisolto) {
+      const avviso = document.createElement('span');
+      avviso.className = 'spesa-item-importo';
+      avviso.style.color = 'var(--danger)';
+      avviso.textContent = '⚠ % da fare';
+      header.appendChild(avviso);
+    }
+
+    item.appendChild(header);
+
+    const dettaglioEspanso = document.createElement('div');
+    dettaglioEspanso.className = 'giorno-item-dettaglio-espanso hidden';
+
+    for (const r of g.righe) {
+      const riga = document.createElement('p');
+      riga.className = 'giorno-riga-dettaglio';
+      const parti = [];
+      const ePermesso = r.cliente === CLIENTE_PERMESSO;
+      if (ePermesso) {
+        if (r.orarioInizioPermesso) parti.push(`dalle ${r.orarioInizioPermesso}`);
+        if (r.orarioFinePermesso) parti.push(`alle ${r.orarioFinePermesso}`);
+        parti.push('<strong>Permesso</strong>');
+      } else {
+        if (r.orarioSwitch) parti.push(`dalle ${r.orarioSwitch}`);
+        if (r.cliente) parti.push(`<strong>${r.cliente}${r.codice ? ' ' + r.codice : ''}</strong>`);
+        if (r.cantiere) parti.push(r.cantiere);
+      }
+      if (r.percentuale !== null && r.percentuale !== undefined) parti.push(`${r.percentuale}%`);
+      if (r.note) parti.push(r.note);
+      riga.innerHTML = parti.join(' · ');
+      dettaglioEspanso.appendChild(riga);
+    }
+
+    const btnElimina = document.createElement('button');
+    btnElimina.type = 'button';
+    btnElimina.className = 'btn-elimina-giorno';
+    btnElimina.textContent = '🗑 Elimina giornata';
+    btnElimina.addEventListener('click', (e) => {
+      e.stopPropagation();
+      eliminaGiornoAttivitaConferma(g);
+    });
+    dettaglioEspanso.appendChild(btnElimina);
+
+    item.appendChild(dettaglioEspanso);
+
+    header.addEventListener('click', () => {
+      dettaglioEspanso.classList.toggle('hidden');
+    });
+
+    el.listaGiorniAttivita.appendChild(item);
+  }
+}
+
+async function eliminaGiornoAttivitaConferma(giorno) {
+  const dataEtichetta = parseDataISO(giorno.data).toLocaleDateString('it-IT');
+  const conferma = await chiediConferma(`Eliminare la giornata del ${dataEtichetta}?`);
+  if (!conferma) return;
+  await eliminaGiornoAttivita(giorno.id);
+  await aggiornaAttivita();
+}
+
+async function chiudiMeseAttivita() {
+  const conferma = await chiediConferma(
+    `Chiudere ${etichettaMese(stato.meseAttivoAttivita)}? Potrai comunque riaprirlo in seguito.`
+  );
+  if (!conferma) return;
+  await setStatoMeseAttivita(stato.meseAttivoAttivita, true);
+  await aggiornaAttivita();
+}
+
+async function riapriMeseAttivita() {
+  const conferma = await chiediConferma(`Riaprire ${etichettaMese(stato.meseAttivoAttivita)} per modificarlo?`);
+  if (!conferma) return;
+  await setStatoMeseAttivita(stato.meseAttivoAttivita, false);
+  await aggiornaAttivita();
+}
+
+/* =========================================================
+   ATTIVITÀ — anagrafica clienti/cantieri
+   ========================================================= */
+
+async function apriAnagrafica() {
+  const dipendente = localStorage.getItem('dipendenteAttivo');
+  if (!dipendente) {
+    alert('Seleziona prima un dipendente nell\'hub.');
+    return;
+  }
+  const anagrafica = await getAnagraficaAttivita(dipendente);
+  stato.anagraficaClienti = JSON.parse(JSON.stringify(anagrafica.clienti || []));
+  el.inputTC.value = anagrafica.tc || suggerisciSiglaTC(dipendente);
+  el.inputOrarioInizio.value = anagrafica.orarioInizio || '08:00';
+  el.inputOrarioFine.value = anagrafica.orarioFine || '17:00';
+  renderAnagraficaClienti();
+
+  el.viewAttivita.classList.add('hidden');
+  el.viewAnagrafica.classList.remove('hidden');
+}
+
+function chiudiAnagrafica() {
+  el.viewAnagrafica.classList.add('hidden');
+  el.viewAttivita.classList.remove('hidden');
+}
+
+function renderAnagraficaClienti() {
+  el.listaClientiAnagrafica.innerHTML = '';
+
+  stato.anagraficaClienti.forEach((cliente, ci) => {
+    const div = document.createElement('div');
+    div.className = 'anagrafica-cliente';
+
+    const inputNome = document.createElement('input');
+    inputNome.className = 'anagrafica-cliente-nome';
+    inputNome.type = 'text';
+    inputNome.placeholder = 'Nome cliente (es. PEI)';
+    inputNome.value = cliente.nome;
+    inputNome.addEventListener('input', () => { cliente.nome = inputNome.value; });
+    div.appendChild(inputNome);
+
+    const subContainer = document.createElement('div');
+    subContainer.className = 'anagrafica-sottoclienti';
+
+    cliente.sottoclienti.forEach((sc, si) => {
+      const subDiv = document.createElement('div');
+      subDiv.className = 'anagrafica-sottocliente';
+
+      const inputCodice = document.createElement('input');
+      inputCodice.type = 'text';
+      inputCodice.placeholder = 'Codice (es. P.223)';
+      inputCodice.value = sc.codice;
+      inputCodice.addEventListener('input', () => { sc.codice = inputCodice.value; });
+
+      const inputCantieri = document.createElement('input');
+      inputCantieri.type = 'text';
+      inputCantieri.placeholder = 'Cantieri tipici, separati da virgola';
+      inputCantieri.value = sc.cantieri.join(', ');
+      inputCantieri.addEventListener('input', () => {
+        sc.cantieri = inputCantieri.value.split(',').map(s => s.trim()).filter(Boolean);
+      });
+
+      const rigaAzioni = document.createElement('div');
+      rigaAzioni.className = 'anagrafica-riga-azioni';
+      const btnRimuoviSub = document.createElement('button');
+      btnRimuoviSub.type = 'button';
+      btnRimuoviSub.className = 'btn-rimuovi-mini';
+      btnRimuoviSub.textContent = '✕ Rimuovi codice';
+      btnRimuoviSub.addEventListener('click', () => {
+        cliente.sottoclienti.splice(si, 1);
+        renderAnagraficaClienti();
+      });
+      rigaAzioni.appendChild(btnRimuoviSub);
+
+      subDiv.appendChild(inputCodice);
+      subDiv.appendChild(inputCantieri);
+      subDiv.appendChild(rigaAzioni);
+      subContainer.appendChild(subDiv);
+    });
+    div.appendChild(subContainer);
+
+    const azioniCliente = document.createElement('div');
+    azioniCliente.className = 'anagrafica-cliente-azioni';
+
+    const btnAggiungiSub = document.createElement('button');
+    btnAggiungiSub.type = 'button';
+    btnAggiungiSub.className = 'btn-testo-mini';
+    btnAggiungiSub.textContent = '+ Aggiungi codice';
+    btnAggiungiSub.addEventListener('click', () => {
+      cliente.sottoclienti.push({ codice: '', cantieri: [] });
+      renderAnagraficaClienti();
+    });
+
+    const btnRimuoviCliente = document.createElement('button');
+    btnRimuoviCliente.type = 'button';
+    btnRimuoviCliente.className = 'btn-rimuovi-mini';
+    btnRimuoviCliente.textContent = '🗑 Elimina cliente';
+    btnRimuoviCliente.addEventListener('click', () => {
+      stato.anagraficaClienti.splice(ci, 1);
+      renderAnagraficaClienti();
+    });
+
+    azioniCliente.appendChild(btnAggiungiSub);
+    azioniCliente.appendChild(btnRimuoviCliente);
+    div.appendChild(azioniCliente);
+
+    el.listaClientiAnagrafica.appendChild(div);
+  });
+}
+
+async function salvaAnagraficaDaForm() {
+  const dipendente = localStorage.getItem('dipendenteAttivo');
+  if (!dipendente) return;
+
+  const clientiPuliti = stato.anagraficaClienti
+    .filter(c => c.nome.trim())
+    .map(c => ({
+      nome: c.nome.trim(),
+      sottoclienti: c.sottoclienti
+        .filter(sc => sc.codice.trim())
+        .map(sc => ({ codice: sc.codice.trim(), cantieri: sc.cantieri }))
+    }));
+
+  await salvaAnagraficaAttivita({
+    dipendente,
+    tc: (el.inputTC.value || '').trim().toUpperCase(),
+    orarioInizio: el.inputOrarioInizio.value || '08:00',
+    orarioFine: el.inputOrarioFine.value || '17:00',
+    clienti: clientiPuliti
+  });
+
+  chiudiAnagrafica();
+}
+
+/* =========================================================
+   ATTIVITÀ — dettatura vocale note
+   ========================================================= */
+
+function correggiTestoDettato(testo) {
+  let t = testo.trim().replace(/\s+/g, ' ');
+  if (!t) return t;
+
+  const sostituzioni = [
+    [/\bpunto e virgola\b/gi, ';'],
+    [/\bpunto interrogativo\b/gi, '?'],
+    [/\bpunto esclamativo\b/gi, '!'],
+    [/\bdue punti\b/gi, ':'],
+    [/\bvirgola\b/gi, ','],
+    [/\bpunto\b/gi, '.']
+  ];
+  for (const [regex, sostituto] of sostituzioni) t = t.replace(regex, sostituto);
+
+  t = t.replace(/\s+([,.;:!?])/g, '$1');
+  t = t.charAt(0).toUpperCase() + t.slice(1);
+  t = t.replace(/([.!?]\s+)([a-zàèéìòù])/g, (m, sep, lettera) => sep + lettera.toUpperCase());
+  if (!/[.!?]$/.test(t)) t += '.';
+  return t;
+}
+
+function abilitaDettatura(input, btnMic) {
+  const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognitionCtor) {
+    btnMic.classList.add('hidden');
+    return;
+  }
+
+  let riconoscimento = null;
+
+  btnMic.addEventListener('click', () => {
+    if (riconoscimento) return;
+    riconoscimento = new SpeechRecognitionCtor();
+    riconoscimento.lang = 'it-IT';
+    riconoscimento.interimResults = false;
+    riconoscimento.maxAlternatives = 1;
+
+    btnMic.classList.add('mic-attivo');
+
+    riconoscimento.addEventListener('result', (e) => {
+      const testoGrezzo = e.results[0][0].transcript;
+      input.value = correggiTestoDettato(testoGrezzo);
+      input.dispatchEvent(new Event('input'));
+    });
+    riconoscimento.addEventListener('end', () => {
+      btnMic.classList.remove('mic-attivo');
+      riconoscimento = null;
+    });
+    riconoscimento.addEventListener('error', () => {
+      btnMic.classList.remove('mic-attivo');
+      riconoscimento = null;
+    });
+
+    riconoscimento.start();
+  });
+}
+
+/* =========================================================
+   ATTIVITÀ — form nuova giornata
+   ========================================================= */
+
+function popolaSelectClienti(selectEl, includiPermesso = false) {
+  selectEl.innerHTML = '<option value="" disabled selected>— Seleziona —</option>';
+  for (const cliente of stato.anagraficaCorrente.clienti) {
+    const opt = document.createElement('option');
+    opt.value = cliente.nome;
+    opt.textContent = cliente.nome;
+    selectEl.appendChild(opt);
+  }
+  if (includiPermesso) {
+    const optPermesso = document.createElement('option');
+    optPermesso.value = CLIENTE_PERMESSO;
+    optPermesso.textContent = '🕐 Permesso';
+    selectEl.appendChild(optPermesso);
+  }
+}
+
+async function apriGiornoForm() {
+  const dipendente = localStorage.getItem('dipendenteAttivo');
+  if (!dipendente) {
+    alert('Seleziona prima un dipendente nell\'hub.');
+    return;
+  }
+
+  el.formGiorno.reset();
+  el.inputGiornoData.value = dataISOCorrente();
+  el.bloccoFerie.classList.add('hidden');
+  el.bloccoMalattia.classList.add('hidden');
+  el.bloccoInfortunio.classList.add('hidden');
+  el.bloccoSmart.classList.add('hidden');
+  el.bloccoNormale.classList.remove('hidden');
+  el.avvisoMultiCliente.classList.add('hidden');
+  el.listaTappe.innerHTML = '';
+
+  stato.anagraficaCorrente = await getAnagraficaAttivita(dipendente);
+
+  if (stato.anagraficaCorrente.clienti.length === 0) {
+    const vaiAnagrafica = await chiediConferma('Non hai ancora nessun cliente in anagrafica. Vuoi aggiungerlo ora?');
+    if (vaiAnagrafica) {
+      await apriAnagrafica();
+      return;
+    }
+  }
+
+  popolaSelectClienti(el.selectSmartCliente);
+  stato.tappeCounter = 0;
+  aggiungiTappaVuota();
+
+  el.viewAttivita.classList.add('hidden');
+  el.viewGiornoForm.classList.remove('hidden');
+}
+
+function chiudiGiornoForm() {
+  el.viewGiornoForm.classList.add('hidden');
+  el.viewAttivita.classList.remove('hidden');
+}
+
+function rinumeraTappe() {
+  [...el.listaTappe.children].forEach((div, i) => {
+    div.querySelector('.tappa-titolo-riga span').textContent = `Tappa ${i + 1}`;
+  });
+}
+
+function aggiornaAvvisoMultiCliente() {
+  const clientiScelti = new Set(
+    [...el.listaTappe.querySelectorAll('.tappa-cliente')]
+      .map(s => s.value)
+      .filter(Boolean)
+  );
+  el.avvisoMultiCliente.classList.toggle('hidden', clientiScelti.size <= 1);
+}
+
+function aggiornaOrariTappe() {
+  const divs = [...el.listaTappe.children];
+  divs.forEach((div, i) => {
+    const selectCliente = div.querySelector('.tappa-cliente');
+    const clienteAttuale = selectCliente.value;
+    const ePermesso = clienteAttuale === CLIENTE_PERMESSO;
+    const clientePrecedente = i > 0 ? divs[i - 1].querySelector('.tappa-cliente').value : null;
+    const precedenteEPermesso = clientePrecedente === CLIENTE_PERMESSO;
+
+    const labelCodice = div.querySelector('.tappa-codice-label');
+    const labelCantiere = div.querySelector('.tappa-cantiere-label');
+    labelCodice.classList.toggle('hidden', ePermesso);
+    labelCantiere.classList.toggle('hidden', ePermesso);
+    if (ePermesso) {
+      div.querySelector('.tappa-codice').value = '';
+      div.querySelector('.tappa-cantiere').value = '';
+    }
+
+    const labelOrario = div.querySelector('.tappa-orario-label');
+    const inputOrario = div.querySelector('.tappa-orario-switch');
+    const bloccoPermessoOrari = div.querySelector('.tappa-permesso-orari');
+    const labelPermessoInizio = div.querySelector('.tappa-permesso-inizio-label');
+    const inputPermessoInizio = div.querySelector('.tappa-permesso-inizio');
+    const labelPermessoFine = div.querySelector('.tappa-permesso-fine-label');
+    const inputPermessoFine = div.querySelector('.tappa-permesso-fine');
+
+    if (ePermesso) {
+      bloccoPermessoOrari.classList.remove('hidden');
+      labelOrario.classList.add('hidden');
+      inputOrario.value = '';
+      labelPermessoInizio.classList.remove('hidden');
+      labelPermessoFine.classList.remove('hidden');
+    } else {
+      bloccoPermessoOrari.classList.add('hidden');
+      inputPermessoInizio.value = '';
+      inputPermessoFine.value = '';
+
+      const eSwitch = i > 0 && !precedenteEPermesso && clienteAttuale && clientePrecedente && clienteAttuale !== clientePrecedente;
+      labelOrario.classList.toggle('hidden', !eSwitch);
+      if (!eSwitch) inputOrario.value = '';
+    }
+  });
+}
+
+function aggiornaCantieriTappa(nomeCliente, codice, datalist) {
+  datalist.innerHTML = '';
+  const cliente = stato.anagraficaCorrente.clienti.find(c => c.nome === nomeCliente);
+  const sc = cliente ? cliente.sottoclienti.find(s => s.codice === codice) : null;
+  if (!sc) return;
+  for (const cantiere of sc.cantieri) {
+    const opt = document.createElement('option');
+    opt.value = cantiere;
+    datalist.appendChild(opt);
+  }
+}
+
+function aggiornaCodiciTappa(selectCliente, selectCodice, datalist) {
+  const cliente = stato.anagraficaCorrente.clienti.find(c => c.nome === selectCliente.value);
+  selectCodice.innerHTML = '';
+  if (!cliente) return;
+  cliente.sottoclienti.forEach((sc) => {
+    const opt = document.createElement('option');
+    opt.value = sc.codice;
+    opt.textContent = sc.codice;
+    selectCodice.appendChild(opt);
+  });
+  if (cliente.sottoclienti.length === 1) {
+    selectCodice.value = cliente.sottoclienti[0].codice;
+  }
+  aggiornaCantieriTappa(selectCliente.value, selectCodice.value, datalist);
+}
+
+function aggiungiTappaVuota() {
+  const index = stato.tappeCounter++;
+  const div = document.createElement('div');
+  div.className = 'tappa-blocco';
+  div.dataset.tappaIndex = index;
+
+  const titolo = document.createElement('div');
+  titolo.className = 'tappa-titolo-riga';
+  const spanTitolo = document.createElement('span');
+  spanTitolo.textContent = `Tappa ${el.listaTappe.children.length + 1}`;
+  titolo.appendChild(spanTitolo);
+
+  const btnRimuovi = document.createElement('button');
+  btnRimuovi.type = 'button';
+  btnRimuovi.className = 'btn-rimuovi-mini';
+  btnRimuovi.textContent = '✕ Rimuovi';
+  btnRimuovi.addEventListener('click', () => {
+    div.remove();
+    rinumeraTappe();
+    aggiornaAvvisoMultiCliente();
+    aggiornaOrariTappe();
+  });
+  titolo.appendChild(btnRimuovi);
+  div.appendChild(titolo);
+
+  const labelCliente = document.createElement('label');
+  labelCliente.className = 'campo-label';
+  labelCliente.append('Cliente');
+  const selectCliente = document.createElement('select');
+  selectCliente.className = 'tappa-cliente';
+  labelCliente.appendChild(selectCliente);
+  div.appendChild(labelCliente);
+
+  const labelOrarioSwitch = document.createElement('label');
+  labelOrarioSwitch.className = 'campo-label tappa-orario-label hidden';
+  labelOrarioSwitch.append('Orario switch (cambio cliente)');
+  const inputOrarioSwitch = document.createElement('input');
+  inputOrarioSwitch.type = 'time';
+  inputOrarioSwitch.className = 'tappa-orario-switch';
+  labelOrarioSwitch.appendChild(inputOrarioSwitch);
+  div.appendChild(labelOrarioSwitch);
+
+  const bloccoPermessoOrari = document.createElement('div');
+  bloccoPermessoOrari.className = 'campo-riga-doppia tappa-permesso-orari hidden';
+  const labelPermessoInizio = document.createElement('label');
+  labelPermessoInizio.className = 'campo-label tappa-permesso-inizio-label';
+  labelPermessoInizio.append('Orario inizio permesso');
+  const inputPermessoInizio = document.createElement('input');
+  inputPermessoInizio.type = 'time';
+  inputPermessoInizio.step = '3600';
+  inputPermessoInizio.className = 'tappa-permesso-inizio';
+  labelPermessoInizio.appendChild(inputPermessoInizio);
+  const labelPermessoFine = document.createElement('label');
+  labelPermessoFine.className = 'campo-label tappa-permesso-fine-label';
+  labelPermessoFine.append('Orario fine permesso');
+  const inputPermessoFine = document.createElement('input');
+  inputPermessoFine.type = 'time';
+  inputPermessoFine.step = '3600';
+  inputPermessoFine.className = 'tappa-permesso-fine';
+  labelPermessoFine.appendChild(inputPermessoFine);
+  bloccoPermessoOrari.appendChild(labelPermessoInizio);
+  bloccoPermessoOrari.appendChild(labelPermessoFine);
+  div.appendChild(bloccoPermessoOrari);
+  abilitaArrotondamentoOraIntera(inputPermessoInizio);
+  abilitaArrotondamentoOraIntera(inputPermessoFine);
+
+  const labelCodice = document.createElement('label');
+  labelCodice.className = 'campo-label tappa-codice-label';
+  labelCodice.append('Codice');
+  const selectCodice = document.createElement('select');
+  selectCodice.className = 'tappa-codice';
+  labelCodice.appendChild(selectCodice);
+  div.appendChild(labelCodice);
+
+  const labelCantiere = document.createElement('label');
+  labelCantiere.className = 'campo-label tappa-cantiere-label';
+  labelCantiere.append('Cantiere');
+  const inputCantiere = document.createElement('input');
+  inputCantiere.type = 'text';
+  inputCantiere.className = 'tappa-cantiere';
+  const datalistId = `tappa-cantieri-${index}`;
+  inputCantiere.setAttribute('list', datalistId);
+  const datalist = document.createElement('datalist');
+  datalist.id = datalistId;
+  labelCantiere.appendChild(inputCantiere);
+  labelCantiere.appendChild(datalist);
+  div.appendChild(labelCantiere);
+
+  const labelNote = document.createElement('label');
+  labelNote.className = 'campo-label';
+  labelNote.append('Note');
+  const wrapperNote = document.createElement('div');
+  wrapperNote.className = 'campo-con-microfono';
+  const inputNote = document.createElement('input');
+  inputNote.type = 'text';
+  inputNote.className = 'tappa-note';
+  const btnMicNote = document.createElement('button');
+  btnMicNote.type = 'button';
+  btnMicNote.className = 'btn-microfono';
+  btnMicNote.setAttribute('aria-label', 'Detta nota');
+  btnMicNote.textContent = '🎤';
+  wrapperNote.appendChild(inputNote);
+  wrapperNote.appendChild(btnMicNote);
+  labelNote.appendChild(wrapperNote);
+  div.appendChild(labelNote);
+  abilitaDettatura(inputNote, btnMicNote);
+
+  popolaSelectClienti(selectCliente, true);
+
+  selectCliente.addEventListener('change', () => {
+    if (selectCliente.value !== CLIENTE_PERMESSO) {
+      aggiornaCodiciTappa(selectCliente, selectCodice, datalist);
+    }
+    aggiornaAvvisoMultiCliente();
+    aggiornaOrariTappe();
+  });
+  selectCodice.addEventListener('change', () => {
+    aggiornaCantieriTappa(selectCliente.value, selectCodice.value, datalist);
+  });
+
+  el.listaTappe.appendChild(div);
+}
+
+function raggruppaInBlocchi(righe) {
+  const blocchi = [];
+  for (const r of righe) {
+    const ultimo = blocchi[blocchi.length - 1];
+    if (ultimo && ultimo.cliente === r.cliente) {
+      ultimo.righe.push(r);
+    } else {
+      blocchi.push({ cliente: r.cliente, righe: [r] });
+    }
+  }
+  return blocchi;
+}
+
+function orarioAMinuti(hhmm) {
+  if (!hhmm) return null;
+  const parti = hhmm.split(':');
+  if (parti.length !== 2) return null;
+  const h = Number(parti[0]);
+  const m = Number(parti[1]);
+  if (Number.isNaN(h) || Number.isNaN(m)) return null;
+  return h * 60 + m;
+}
+
+function orarioPermessoAMinuti(hhmm) {
+  const minuti = orarioAMinuti(hhmm);
+  if (minuti === null) return null;
+  return Math.round(minuti / 60) * 60;
+}
+
+function abilitaArrotondamentoOraIntera(input) {
+  input.addEventListener('change', () => {
+    const minuti = orarioPermessoAMinuti(input.value);
+    if (minuti === null) return;
+    const ore = String(Math.floor(minuti / 60)).padStart(2, '0');
+    input.value = `${ore}:00`;
+  });
+}
+
+function calcolaPercentualiBlocchi(blocchi, orarioInizio, orarioFine) {
+  const inizioGiorno = orarioAMinuti(orarioInizio);
+  const fineGiorno = orarioAMinuti(orarioFine);
+  if (inizioGiorno === null || fineGiorno === null || fineGiorno <= inizioGiorno) return false;
+
+  const inizi = [];
+  const fini = [];
+
+  for (let i = 0; i < blocchi.length; i++) {
+    const blocco = blocchi[i];
+    if (blocco.cliente === CLIENTE_PERMESSO) {
+      const inizio = orarioPermessoAMinuti(blocco.righe[0].orarioInizioPermesso);
+      const fine = orarioPermessoAMinuti(blocco.righe[blocco.righe.length - 1].orarioFinePermesso);
+      inizi.push(inizio);
+      fini.push(fine);
+    } else {
+      let inizio;
+      if (i === 0) {
+        inizio = inizioGiorno;
+      } else if (blocchi[i - 1].cliente === CLIENTE_PERMESSO) {
+        inizio = fini[i - 1];
+      } else {
+        inizio = orarioAMinuti(blocco.righe[0].orarioSwitch);
+      }
+      inizi.push(inizio);
+      fini.push(null);
+    }
+  }
+
+  for (let i = 0; i < blocchi.length; i++) {
+    if (fini[i] === null) {
+      fini[i] = (i === blocchi.length - 1) ? fineGiorno : inizi[i + 1];
+    }
+  }
+
+  let cursore = inizioGiorno;
+  for (let i = 0; i < blocchi.length; i++) {
+    if (inizi[i] === null || fini[i] === null) return false;
+    if (inizi[i] !== cursore) return false;
+    if (fini[i] <= inizi[i]) return false;
+    cursore = fini[i];
+  }
+  if (cursore !== fineGiorno) return false;
+
+  const totale = fineGiorno - inizioGiorno;
+  const percentuali = blocchi.map((_, i) => Math.round((fini[i] - inizi[i]) / totale * 100));
+  const somma = percentuali.reduce((a, b) => a + b, 0);
+  percentuali[percentuali.length - 1] += 100 - somma;
+
+  blocchi.forEach((blocco, i) => {
+    blocco.righe[blocco.righe.length - 1].percentuale = percentuali[i];
+  });
+  return true;
+}
+
+function unisciPercentualiClientiRipetuti(blocchi) {
+  const primaRigaPerCliente = new Map();
+  for (const blocco of blocchi) {
+    const rigaConPercentuale = blocco.righe[blocco.righe.length - 1];
+    if (rigaConPercentuale.percentuale === null) continue;
+    const ancora = primaRigaPerCliente.get(blocco.cliente);
+    if (ancora) {
+      ancora.percentuale += rigaConPercentuale.percentuale;
+      rigaConPercentuale.percentuale = null;
+    } else {
+      primaRigaPerCliente.set(blocco.cliente, rigaConPercentuale);
+    }
+  }
+}
+
+async function salvaFormGiorno(e) {
+  e.preventDefault();
+  const dipendente = localStorage.getItem('dipendenteAttivo');
+  const tipoGiorno = document.querySelector('input[name="tipo-giorno"]:checked').value;
+  const data = el.inputGiornoData.value;
+  const meseAnno = data.slice(0, 7);
+
+  let righe = [];
+  let percentualiRisolte = true;
+
+  if (tipoGiorno === 'ferie') {
+    const luogo = el.inputFerieLuogo.value.trim();
+    righe = [{ cliente: '', codice: '', cantiere: '', note: luogo ? `FERIE - ${luogo}` : 'FERIE', percentuale: null }];
+  } else if (tipoGiorno === 'malattia') {
+    const nota = el.inputMalattiaNote.value.trim();
+    righe = [{ cliente: '', codice: '', cantiere: '', note: nota ? `MALATTIA - ${nota}` : 'MALATTIA', percentuale: null }];
+  } else if (tipoGiorno === 'infortunio') {
+    const nota = el.inputInfortunioNote.value.trim();
+    righe = [{ cliente: '', codice: '', cantiere: '', note: nota ? `INFORTUNIO - ${nota}` : 'INFORTUNIO', percentuale: null }];
+  } else if (tipoGiorno === 'smart') {
+    const cliente = el.selectSmartCliente.value;
+    if (!cliente) {
+      alert('Seleziona il cliente per cui stai lavorando in smart working.');
+      return;
+    }
+    righe = [{ cliente, codice: '', cantiere: 'Smart working', note: el.inputSmartNote.value.trim(), percentuale: 100 }];
+  } else {
+    const blocchi = [...el.listaTappe.children];
+    if (blocchi.length === 0) {
+      alert('Aggiungi almeno una tappa.');
+      return;
+    }
+    righe = blocchi.map(div => ({
+      cliente: div.querySelector('.tappa-cliente').value,
+      codice: div.querySelector('.tappa-codice').value,
+      cantiere: div.querySelector('.tappa-cantiere').value.trim(),
+      note: div.querySelector('.tappa-note').value.trim(),
+      orarioSwitch: div.querySelector('.tappa-orario-switch').value || '',
+      orarioInizioPermesso: div.querySelector('.tappa-permesso-inizio').value || '',
+      orarioFinePermesso: div.querySelector('.tappa-permesso-fine').value || '',
+      percentuale: null
+    }));
+
+    if (righe.some(r => !r.cliente || (r.cliente !== CLIENTE_PERMESSO && !r.cantiere))) {
+      alert('Ogni tappa deve avere almeno cliente e cantiere (o essere un permesso).');
+      return;
+    }
+
+    const blocchiCliente = raggruppaInBlocchi(righe);
+    if (blocchiCliente.length === 1) {
+      righe[righe.length - 1].percentuale = 100;
+      percentualiRisolte = true;
+    } else {
+      percentualiRisolte = calcolaPercentualiBlocchi(blocchiCliente, stato.anagraficaCorrente.orarioInizio, stato.anagraficaCorrente.orarioFine);
+      if (percentualiRisolte) {
+        unisciPercentualiClientiRipetuti(blocchiCliente);
+      } else {
+        alert('Non riesco a calcolare le percentuali: controlla di aver indicato l\'orario di switch per ogni cambio cliente, in ordine crescente e compreso nell\'orario di lavoro standard. Salvo comunque la giornata, ma dovrai completare le percentuali in seguito.');
+      }
+    }
+  }
+
+  const multiClienteNonRisolto = tipoGiorno === 'normale' && !percentualiRisolte;
+
+  await salvaGiornoAttivita({
+    dipendente,
+    meseAnno,
+    data,
+    tipoGiorno,
+    righe,
+    multiClienteNonRisolto
+  });
+
+  chiudiGiornoForm();
+  await aggiornaAttivita();
+}
+
+document.querySelectorAll('input[name="tipo-giorno"]').forEach(radio => {
+  radio.addEventListener('change', () => {
+    const tipo = document.querySelector('input[name="tipo-giorno"]:checked').value;
+    el.bloccoFerie.classList.toggle('hidden', tipo !== 'ferie');
+    el.bloccoMalattia.classList.toggle('hidden', tipo !== 'malattia');
+    el.bloccoInfortunio.classList.toggle('hidden', tipo !== 'infortunio');
+    el.bloccoSmart.classList.toggle('hidden', tipo !== 'smart');
+    el.bloccoNormale.classList.toggle('hidden', tipo !== 'normale');
+  });
+});
+
+el.selectDipendente.addEventListener('change', async () => {
   localStorage.setItem('dipendenteAttivo', el.selectDipendente.value);
+  stato.meseAttivoAttivita = await determinaMeseAttivoAttivitaIniziale(el.selectDipendente.value);
 });
 
 el.cardScontrini.addEventListener('click', apriScontrini);
 el.cardRimborso.addEventListener('click', apriRimborso);
-el.cardAttivita.addEventListener('click', () => alert('Modulo in costruzione'));
+el.cardAttivita.addEventListener('click', apriAttivita);
 el.btnTornaHub.addEventListener('click', tornaAllHub);
 el.btnDatiFatturazione.addEventListener('click', apriFatturazione);
 el.btnTornaHubFatturazione.addEventListener('click', tornaAllHubDaFatturazione);
+
+el.btnTornaHubAttivita.addEventListener('click', tornaAllHubDaAttivita);
+el.btnPrevMonthAttivita.addEventListener('click', () => cambiaMeseAttivita(-1));
+el.btnNextMonthAttivita.addEventListener('click', () => cambiaMeseAttivita(1));
+el.btnReopenMonthAttivita.addEventListener('click', riapriMeseAttivita);
+el.btnCloseMonthAttivita.addEventListener('click', chiudiMeseAttivita);
+el.btnAddGiorno.addEventListener('click', apriGiornoForm);
+el.btnApriAnagrafica.addEventListener('click', apriAnagrafica);
+el.btnExportAttivita.addEventListener('click', async () => {
+  const dipendente = localStorage.getItem('dipendenteAttivo');
+  const giorni = await getGiorniAttivitaDelMese(stato.meseAttivoAttivita, dipendente);
+  const mancanti = trovaGiorniLavorativiMancanti(stato.meseAttivoAttivita, giorni);
+  if (mancanti.length > 0) {
+    const elenco = mancanti.map(d => parseDataISO(d).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' })).join(', ');
+    const procedi = await chiediConferma(`Mancano dati per questi giorni lavorativi: ${elenco}. Esportare comunque?`);
+    if (!procedi) return;
+  }
+  await generaPdfAttivita(stato.meseAttivoAttivita);
+  await generaPdfPresenze(stato.meseAttivoAttivita);
+});
+
+el.btnAnagraficaAnnulla.addEventListener('click', chiudiAnagrafica);
+el.btnAggiungiCliente.addEventListener('click', () => {
+  stato.anagraficaClienti.push({ nome: '', sottoclienti: [{ codice: '', cantieri: [] }] });
+  renderAnagraficaClienti();
+});
+el.btnSalvaAnagrafica.addEventListener('click', salvaAnagraficaDaForm);
+
+el.btnGiornoFormAnnulla.addEventListener('click', chiudiGiornoForm);
+el.btnAggiungiTappa.addEventListener('click', () => {
+  aggiungiTappaVuota();
+  aggiornaOrariTappe();
+});
+el.formGiorno.addEventListener('submit', salvaFormGiorno);
+abilitaDettatura(el.inputSmartNote, el.btnMicSmartNote);
 
 /* =========================================================
    RIMBORSO
@@ -1488,6 +2476,263 @@ async function generaPdfRimborso(meseAnno) {
 }
 
 /* =========================================================
+   EXPORT PDF ATTIVITÀ (overlay sul modulo aziendale originale)
+   ========================================================= */
+
+const ATTIVITA_TEMPLATE = {
+  basePdfPath: 'templates/report_attivita_base.pdf',
+  pageHeight: 595.2,
+  righePerPagina: 18,
+  numPagine: 3,
+  colonne: {
+    TC: [21.5, 108.8],
+    DATA: [108.8, 242.0],
+    CLIENTE: [242.0, 350.75],
+    CANTIERE: [350.75, 474.1],
+    PERCENTUALE: [474.1, 571.5],
+    NOTE: [571.5, 817.0]
+  },
+  righeTop: [173.3, 192.6, 213.5, 234.4, 255.3, 276.2, 297.1, 318.0, 338.8, 359.7, 380.6, 401.5, 422.4, 443.3, 464.1, 485.0, 505.9, 526.8],
+  campoPagina: { numX: 752, totX: 782, top: 125.2 }
+};
+
+function nomeFileExportAttivita(meseAnno) {
+  const { mese } = scomponiMeseAnno(meseAnno);
+  const nomeMese = MESI_IT[mese - 1];
+  const dipendente = localStorage.getItem('dipendenteAttivo');
+  const cognomeNome = dipendente ? invertiNomeCognome(dipendente) : 'Dipendente non impostato';
+  return `${dataOdiernaCompatta()} - Report attivita ${nomeMese} - ${cognomeNome}.pdf`;
+}
+
+async function generaPdfAttivita(meseAnno) {
+  const dipendente = localStorage.getItem('dipendenteAttivo');
+  const giorni = await getGiorniAttivitaDelMese(meseAnno, dipendente);
+  if (giorni.length === 0) {
+    alert(`Nessuna giornata da esportare per ${etichettaMese(meseAnno)}.`);
+    return;
+  }
+  if (giorni.some(g => g.multiClienteNonRisolto)) {
+    alert('Ci sono giornate con più clienti e percentuale non ancora definita (⚠ % da fare). Sistemale prima di esportare.');
+    return;
+  }
+
+  const righeFlat = [];
+  for (const g of giorni) {
+    for (const r of g.righe) righeFlat.push({ data: g.data, ...r });
+  }
+
+  const capienzaTotale = ATTIVITA_TEMPLATE.righePerPagina * ATTIVITA_TEMPLATE.numPagine;
+  if (righeFlat.length > capienzaTotale) {
+    alert(`Questo mese ha ${righeFlat.length} righe, più delle ${capienzaTotale} disponibili sul modulo (${ATTIVITA_TEMPLATE.numPagine} pagine). Elimina o sposta qualche voce prima di esportare: la gestione di pagine aggiuntive non è ancora disponibile.`);
+    return;
+  }
+
+  const anagrafica = await getAnagraficaAttivita(dipendente);
+  const tc = (anagrafica.tc || '').toUpperCase();
+
+  const { PDFDocument, StandardFonts, rgb } = PDFLib;
+  const baseBytes = await caricaBytes(ATTIVITA_TEMPLATE.basePdfPath);
+  const doc = await PDFDocument.load(baseBytes);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const nero = rgb(0, 0, 0);
+  const DIM = 8;
+
+  function scriviRiga(page, top, riga) {
+    const c = ATTIVITA_TEMPLATE.colonne;
+    const y = pdfLibY(top, DIM);
+
+    page.drawText(tc, { x: centraTestoInColonna(font, tc, DIM, c.TC), y, size: DIM, font, color: nero });
+
+    const dataFormattata = parseDataISO(riga.data).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    page.drawText(dataFormattata, { x: centraTestoInColonna(font, dataFormattata, DIM, c.DATA), y, size: DIM, font, color: nero });
+
+    const testoCliente = riga.cliente === CLIENTE_PERMESSO ? 'PERMESSO' : riga.cliente;
+    if (testoCliente) {
+      page.drawText(testoCliente, { x: centraTestoInColonna(font, testoCliente, DIM, c.CLIENTE), y, size: DIM, font, color: nero });
+    }
+
+    const cantiereTesto = [riga.cantiere, riga.codice].filter(Boolean).join(' ');
+    if (cantiereTesto) {
+      page.drawText(cantiereTesto, { x: c.CANTIERE[0] + 3, y, size: DIM, font, color: nero });
+    }
+
+    if (riga.percentuale !== null && riga.percentuale !== undefined) {
+      const testoPct = `${riga.percentuale}%`;
+      page.drawText(testoPct, { x: centraTestoInColonna(font, testoPct, DIM, c.PERCENTUALE), y, size: DIM, font, color: nero });
+    }
+
+    if (riga.note) {
+      const DIM_NOTE = 6;
+      const larghezzaNote = c.NOTE[1] - c.NOTE[0] - 6;
+      const righeNote = suddividiTestoInRighe(font, riga.note, DIM_NOTE, larghezzaNote).slice(0, 2);
+      const passo = DIM_NOTE + 1;
+      const offsetCentratura = righeNote.length > 1 ? passo / 2 : 0;
+      righeNote.forEach((rn, i) => {
+        page.drawText(rn, { x: c.NOTE[0] + 3, y: y + offsetCentratura - i * passo, size: DIM_NOTE, font, color: nero });
+      });
+    }
+  }
+
+  const numPagineNecessarie = Math.max(1, Math.ceil(righeFlat.length / ATTIVITA_TEMPLATE.righePerPagina));
+
+  for (let p = 0; p < numPagineNecessarie; p++) {
+    const page = doc.getPage(p);
+    const cp = ATTIVITA_TEMPLATE.campoPagina;
+    page.drawText(String(p + 1), { x: cp.numX, y: pdfLibY(cp.top, DIM), size: DIM, font, color: nero });
+    page.drawText(String(numPagineNecessarie), { x: cp.totX, y: pdfLibY(cp.top, DIM), size: DIM, font, color: nero });
+
+    const righePagina = righeFlat.slice(p * ATTIVITA_TEMPLATE.righePerPagina, (p + 1) * ATTIVITA_TEMPLATE.righePerPagina);
+    righePagina.forEach((riga, i) => scriviRiga(page, ATTIVITA_TEMPLATE.righeTop[i], riga));
+  }
+
+  for (let p = ATTIVITA_TEMPLATE.numPagine - 1; p >= numPagineNecessarie; p--) {
+    doc.removePage(p);
+  }
+
+  const pdfBytes = await doc.save();
+  const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nomeFileExportAttivita(meseAnno);
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* =========================================================
+   EXPORT PDF PRESENZE (stesso modello, una riga per giornata)
+   ========================================================= */
+
+function trovaGiorniLavorativiMancanti(meseAnno, giorni) {
+  const { anno, mese } = scomponiMeseAnno(meseAnno);
+  const oggi = new Date();
+  const eMeseCorrente = anno === oggi.getFullYear() && mese === (oggi.getMonth() + 1);
+  const ultimoGiorno = eMeseCorrente ? oggi.getDate() : new Date(anno, mese, 0).getDate();
+
+  const dateEsistenti = new Set(giorni.map(g => g.data));
+  const mancanti = [];
+  for (let giorno = 1; giorno <= ultimoGiorno; giorno++) {
+    const dataISO = `${anno}-${String(mese).padStart(2, '0')}-${String(giorno).padStart(2, '0')}`;
+    const giornoSettimana = parseDataISO(dataISO).getDay();
+    if (giornoSettimana === 0 || giornoSettimana === 6) continue;
+    if (!dateEsistenti.has(dataISO)) mancanti.push(dataISO);
+  }
+  return mancanti;
+}
+
+function nomeFileExportPresenze(meseAnno) {
+  const { mese } = scomponiMeseAnno(meseAnno);
+  const nomeMese = MESI_IT[mese - 1];
+  const dipendente = localStorage.getItem('dipendenteAttivo');
+  const cognomeNome = dipendente ? invertiNomeCognome(dipendente) : 'Dipendente non impostato';
+  return `${dataOdiernaCompatta()} - Report presenze ${nomeMese} - ${cognomeNome}.pdf`;
+}
+
+function orePermessoGiorno(giorno) {
+  return giorno.righe
+    .filter(r => r.cliente === CLIENTE_PERMESSO)
+    .reduce((tot, r) => {
+      const ini = orarioPermessoAMinuti(r.orarioInizioPermesso);
+      const fin = orarioPermessoAMinuti(r.orarioFinePermesso);
+      return tot + (ini !== null && fin !== null && fin > ini ? (fin - ini) / 60 : 0);
+    }, 0);
+}
+
+function haLavoratoIlGiorno(giorno) {
+  if (giorno.tipoGiorno === 'smart') return true;
+  if (giorno.tipoGiorno !== 'normale') return false;
+  return giorno.righe.some(r => r.cliente && r.cliente !== CLIENTE_PERMESSO);
+}
+
+function notaPresenzaGiorno(giorno) {
+  if (giorno.tipoGiorno === 'smart') return 'Smart working';
+  if (giorno.tipoGiorno !== 'normale') return giorno.righe[0].note;
+
+  const orePermesso = orePermessoGiorno(giorno);
+  const parti = [];
+  if (haLavoratoIlGiorno(giorno)) parti.push('Lavorato');
+  if (orePermesso > 0) parti.push(`${orePermesso}h permesso`);
+  return parti.join(' + ') || 'Lavorato';
+}
+
+async function generaPdfPresenze(meseAnno) {
+  const dipendente = localStorage.getItem('dipendenteAttivo');
+  const giorni = await getGiorniAttivitaDelMese(meseAnno, dipendente);
+  if (giorni.length === 0) return;
+
+  const righePresenza = giorni.map(g => ({ data: g.data, note: notaPresenzaGiorno(g) }));
+
+  const giorniLavorativi = giorni.filter(haLavoratoIlGiorno).length;
+  const giorniFerie = giorni.filter(g => g.tipoGiorno === 'ferie').length;
+  const orePermessoTotali = giorni.reduce((tot, g) => tot + (g.tipoGiorno === 'normale' ? orePermessoGiorno(g) : 0), 0);
+
+  righePresenza.push({ data: null, note: `TOTALE GIORNI LAVORATIVI: ${giorniLavorativi}` });
+  if (giorniFerie > 0) righePresenza.push({ data: null, note: `TOTALE GIORNI FERIE: ${giorniFerie}` });
+  if (orePermessoTotali > 0) righePresenza.push({ data: null, note: `TOTALE ORE PERMESSO: ${orePermessoTotali}` });
+
+  const capienzaTotale = ATTIVITA_TEMPLATE.righePerPagina * ATTIVITA_TEMPLATE.numPagine;
+  if (righePresenza.length > capienzaTotale) {
+    alert('Il report presenze ha più righe di quelle disponibili sul modulo. Contattami per gestire questo caso.');
+    return;
+  }
+
+  const anagrafica = await getAnagraficaAttivita(dipendente);
+  const tc = (anagrafica.tc || '').toUpperCase();
+
+  const { PDFDocument, StandardFonts, rgb } = PDFLib;
+  const baseBytes = await caricaBytes(ATTIVITA_TEMPLATE.basePdfPath);
+  const doc = await PDFDocument.load(baseBytes);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const nero = rgb(0, 0, 0);
+  const DIM = 8;
+
+  function scriviRigaPresenza(page, top, riga) {
+    const c = ATTIVITA_TEMPLATE.colonne;
+    const y = pdfLibY(top, DIM);
+
+    if (riga.data) {
+      page.drawText(tc, { x: centraTestoInColonna(font, tc, DIM, c.TC), y, size: DIM, font, color: nero });
+      const dataFormattata = parseDataISO(riga.data).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      page.drawText(dataFormattata, { x: centraTestoInColonna(font, dataFormattata, DIM, c.DATA), y, size: DIM, font, color: nero });
+    }
+
+    if (riga.note) {
+      const DIM_NOTE = 6;
+      const larghezzaNote = c.NOTE[1] - c.NOTE[0] - 6;
+      const righeNote = suddividiTestoInRighe(font, riga.note, DIM_NOTE, larghezzaNote).slice(0, 2);
+      const passo = DIM_NOTE + 1;
+      const offsetCentratura = righeNote.length > 1 ? passo / 2 : 0;
+      righeNote.forEach((rn, i) => {
+        page.drawText(rn, { x: c.NOTE[0] + 3, y: y + offsetCentratura - i * passo, size: DIM_NOTE, font, color: nero });
+      });
+    }
+  }
+
+  const numPagineNecessarie = Math.max(1, Math.ceil(righePresenza.length / ATTIVITA_TEMPLATE.righePerPagina));
+  for (let p = 0; p < numPagineNecessarie; p++) {
+    const page = doc.getPage(p);
+    const cp = ATTIVITA_TEMPLATE.campoPagina;
+    page.drawText(String(p + 1), { x: cp.numX, y: pdfLibY(cp.top, DIM), size: DIM, font, color: nero });
+    page.drawText(String(numPagineNecessarie), { x: cp.totX, y: pdfLibY(cp.top, DIM), size: DIM, font, color: nero });
+
+    const righePagina = righePresenza.slice(p * ATTIVITA_TEMPLATE.righePerPagina, (p + 1) * ATTIVITA_TEMPLATE.righePerPagina);
+    righePagina.forEach((riga, i) => scriviRigaPresenza(page, ATTIVITA_TEMPLATE.righeTop[i], riga));
+  }
+  for (let p = ATTIVITA_TEMPLATE.numPagine - 1; p >= numPagineNecessarie; p--) {
+    doc.removePage(p);
+  }
+
+  const pdfBytes = await doc.save();
+  const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nomeFileExportPresenze(meseAnno);
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* =========================================================
    FORM NUOVA SPESA
    ========================================================= */
 
@@ -1732,6 +2977,7 @@ async function avvia() {
   stato.meseAttivo = await determinaMeseAttivoIniziale();
   await aggiornaDashboard();
   stato.meseAttivoRimborso = await determinaMeseAttivoRimborsoIniziale();
+  stato.meseAttivoAttivita = await determinaMeseAttivoAttivitaIniziale(localStorage.getItem('dipendenteAttivo'));
 
   if (navigator.storage && navigator.storage.persist) {
     navigator.storage.persist().catch(() => {});

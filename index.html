@@ -76,11 +76,11 @@
           <span class="hub-card-subtitle">Registro spese mensile</span>
         </span>
       </button>
-      <button id="card-attivita" class="hub-card hub-card-inarrivo">
+      <button id="card-attivita" class="hub-card hub-card-attivo">
         <span class="hub-card-icon">📋</span>
         <span class="hub-card-text">
           <span class="hub-card-title">Attività</span>
-          <span class="hub-card-subtitle">In arrivo</span>
+          <span class="hub-card-subtitle">Report giornaliero cantieri</span>
         </span>
       </button>
     </div>
@@ -272,6 +272,128 @@
       </label>
 
       <button type="submit" class="btn-primary spesa-form-salva">Salva spesa</button>
+    </form>
+  </section>
+
+  <!-- ===================== VISTA ATTIVITÀ ===================== -->
+  <section id="view-attivita" class="view hidden">
+    <header class="app-header">
+      <button id="btn-torna-hub-attivita" class="btn-back" aria-label="Torna all'hub">← <span class="btn-back-label">BACK</span></button>
+      <h1 class="app-title">Attività</h1>
+    </header>
+
+    <div class="month-selector">
+      <button id="btn-prev-month-attivita" class="btn-arrow" aria-label="Mese precedente">◀</button>
+      <div class="month-label-wrap">
+        <span id="month-label-attivita" class="month-label">—</span>
+        <span id="month-closed-badge-attivita" class="badge-closed hidden">✓ Mese chiuso</span>
+      </div>
+      <button id="btn-next-month-attivita" class="btn-arrow" aria-label="Mese successivo">▶</button>
+    </div>
+
+    <button id="btn-reopen-month-attivita" class="btn-secondary hidden">🔓 Riapri mese</button>
+
+    <button id="btn-add-giorno" class="btn-capture btn-generico">+ Aggiungi giornata</button>
+
+    <div id="lista-giorni-attivita" class="lista-spese"></div>
+    <p id="lista-giorni-attivita-empty" class="gallery-empty hidden">Nessuna giornata registrata per questo mese.</p>
+
+    <button id="btn-export-attivita" class="btn-export">Esporta PDF (Attività + Presenze)</button>
+
+    <button id="btn-close-month-attivita" class="btn-close-month">Chiudi mese</button>
+
+    <div class="hub-backup">
+      <button id="btn-apri-anagrafica" class="btn-backup-mini">🗂 Anagrafica clienti/cantieri</button>
+    </div>
+  </section>
+
+  <!-- ===================== VISTA ANAGRAFICA ATTIVITÀ ===================== -->
+  <section id="view-attivita-anagrafica" class="view hidden">
+    <header class="app-header">
+      <button id="btn-anagrafica-annulla" class="btn-back" aria-label="Torna indietro">← <span class="btn-back-label">BACK</span></button>
+      <h1 class="app-title">Anagrafica</h1>
+    </header>
+
+    <label class="campo-label">
+      Sigla TC
+      <input type="text" id="input-tc" maxlength="4">
+    </label>
+
+    <div class="campo-riga-doppia">
+      <label class="campo-label">
+        Inizio giornata standard
+        <input type="time" id="input-orario-inizio">
+      </label>
+      <label class="campo-label">
+        Fine giornata standard
+        <input type="time" id="input-orario-fine">
+      </label>
+    </div>
+    <p class="campo-nota">Usati per calcolare in automatico le percentuali nelle giornate con più clienti.</p>
+
+    <div id="lista-clienti-anagrafica" class="lista-clienti-anagrafica"></div>
+
+    <button type="button" id="btn-aggiungi-cliente" class="btn-secondary">+ Aggiungi cliente</button>
+
+    <button type="button" id="btn-salva-anagrafica" class="btn-primary spesa-form-salva">Salva anagrafica</button>
+  </section>
+
+  <!-- ===================== VISTA NUOVA GIORNATA ===================== -->
+  <section id="view-giorno-form" class="view hidden">
+    <header class="app-header">
+      <button id="btn-giorno-form-annulla" class="btn-back" aria-label="Annulla">← <span class="btn-back-label">BACK</span></button>
+      <h1 class="app-title">Nuova giornata</h1>
+    </header>
+
+    <form id="form-giorno">
+      <label class="campo-label">Data
+        <input type="date" id="input-giorno-data" required>
+      </label>
+
+      <fieldset class="campo-fieldset">
+        <legend>Tipo giornata</legend>
+        <label class="radio-label"><input type="radio" name="tipo-giorno" value="normale" checked> Normale</label>
+        <label class="radio-label"><input type="radio" name="tipo-giorno" value="ferie"> Ferie</label>
+        <label class="radio-label"><input type="radio" name="tipo-giorno" value="malattia"> Malattia</label>
+        <label class="radio-label"><input type="radio" name="tipo-giorno" value="infortunio"> Infortunio</label>
+        <label class="radio-label"><input type="radio" name="tipo-giorno" value="smart"> Smart working</label>
+      </fieldset>
+
+      <div id="blocco-ferie" class="campo-label hidden">
+        Luogo (opzionale)
+        <input type="text" id="input-ferie-luogo" placeholder="es. Parigi">
+      </div>
+
+      <div id="blocco-malattia" class="campo-label hidden">
+        Codice certificato (opzionale)
+        <input type="text" id="input-malattia-note" placeholder="es. numero certificato">
+      </div>
+
+      <div id="blocco-infortunio" class="campo-label hidden">
+        Note (opzionale)
+        <input type="text" id="input-infortunio-note">
+      </div>
+
+      <div id="blocco-smart" class="hidden">
+        <label class="campo-label">Cliente
+          <select id="select-smart-cliente"></select>
+        </label>
+        <label class="campo-label">Note
+          <div class="campo-con-microfono">
+            <input type="text" id="input-smart-note">
+            <button type="button" id="btn-mic-smart-note" class="btn-microfono" aria-label="Detta nota">🎤</button>
+          </div>
+        </label>
+      </div>
+
+      <div id="blocco-normale">
+        <div id="lista-tappe"></div>
+        <button type="button" id="btn-aggiungi-tappa" class="btn-secondary">+ Aggiungi tappa</button>
+      </div>
+
+      <p id="avviso-multi-cliente" class="firma-stato-mini hidden">⚠ Giorno multi-cliente: indica l'orario di switch su ogni tappa che cambia cliente, altrimenti la percentuale non verrà calcolata automaticamente.</p>
+
+      <button type="submit" class="btn-primary spesa-form-salva">Salva giornata</button>
     </form>
   </section>
 
