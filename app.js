@@ -453,6 +453,7 @@ const stato = {
   meseAttivo: meseAnnoCorrente(),
   cameraCategoria: null,
   cameraStream: null,
+  cameraContesto: 'scontrino',
   overlayRicevutaId: null,
   dataScontrino: dataISOCorrente(),
   fotoGrezza: null,
@@ -557,6 +558,8 @@ const el = {
   viewSpesaForm: document.getElementById('view-spesa-form'),
   formSpesa: document.getElementById('form-spesa'),
   btnSpesaFormAnnulla: document.getElementById('btn-spesa-form-annulla'),
+  btnScattaRimborso: document.getElementById('btn-scatta-rimborso'),
+  statoScattaRimborso: document.getElementById('stato-scatta-rimborso'),
   inputSpesaData: document.getElementById('input-spesa-data'),
   inputSpesaEsercente: document.getElementById('input-spesa-esercente'),
   listaEsercenti: document.getElementById('lista-esercenti'),
@@ -752,8 +755,30 @@ async function eliminaRicevutaCorrente() {
    ========================================================= */
 
 async function apriFotocamera(categoria) {
+  stato.cameraContesto = 'scontrino';
   stato.cameraCategoria = categoria;
   el.cameraCategoryLabel.textContent = categoria === 'gasolio' ? '⛽ Gasolio' : '📷 Rimborso';
+  el.viewCamera.classList.remove('hidden');
+
+  try {
+    stato.cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 2560 },
+        height: { ideal: 1440 }
+      },
+      audio: false
+    });
+    el.cameraVideo.srcObject = stato.cameraStream;
+  } catch (err) {
+    alert('Impossibile accedere alla fotocamera: ' + err.message);
+    chiudiFotocamera();
+  }
+}
+
+async function apriFotocameraSpesaAI() {
+  stato.cameraContesto = 'spesa-ai';
+  el.cameraCategoryLabel.textContent = '📷 Scontrino';
   el.viewCamera.classList.remove('hidden');
 
   try {
@@ -807,13 +832,23 @@ function scattaFoto() {
   const ctx = canvas.getContext('2d');
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
+  if (navigator.vibrate) navigator.vibrate(60);
+
+  if (stato.cameraContesto === 'spesa-ai') {
+    const scatto = document.createElement('canvas');
+    scatto.width = canvas.width;
+    scatto.height = canvas.height;
+    scatto.getContext('2d').drawImage(canvas, 0, 0);
+    chiudiFotocamera();
+    elaboraScontrinoAI(scatto);
+    return;
+  }
+
   const grezza = document.createElement('canvas');
   grezza.width = canvas.width;
   grezza.height = canvas.height;
   grezza.getContext('2d').drawImage(canvas, 0, 0);
   stato.fotoGrezza = grezza;
-
-  if (navigator.vibrate) navigator.vibrate(60);
 
   chiudiFotocamera();
   apriRifinisci();
@@ -1886,6 +1921,43 @@ function abilitaDettaturaGiornata(btnMic, statoTesto) {
 
 function abilitaDettaturaTappa(btnMic, statoTesto, div) {
   avviaCatturaVocaleContinua(btnMic, statoTesto, (testo) => elaboraRaccontoTappa(testo, div, statoTesto));
+}
+
+/* =========================================================
+   RIMBORSO — lettura scontrino con AI (foto → dati)
+   ========================================================= */
+
+async function elaboraScontrinoAI(canvas) {
+  el.statoScattaRimborso.classList.remove('hidden');
+  el.statoScattaRimborso.textContent = 'Sto leggendo lo scontrino...';
+
+  try {
+    const blob = await comprimiImmagine(canvas);
+    const dataUrl = await blobToBase64(blob);
+    const immagineBase64 = dataUrl.split(',')[1];
+
+    const risposta = await fetch(AI_WORKER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ modalita: 'scontrino', immagine: immagineBase64 })
+    });
+    if (!risposta.ok) throw new Error('il servizio non ha risposto correttamente');
+    const risultato = await risposta.json();
+    if (risultato.errore) throw new Error(risultato.errore);
+
+    if (risultato.data) el.inputSpesaData.value = risultato.data;
+    if (risultato.esercente) el.inputSpesaEsercente.value = risultato.esercente;
+    if (risultato.luogo) el.inputSpesaLuogo.value = risultato.luogo;
+    if (risultato.descrizione) el.inputSpesaDescrizione.value = risultato.descrizione;
+    if (risultato.importo) el.inputSpesaImporto.value = risultato.importo;
+    const radioScontrino = document.querySelector('input[name="giustificativo"][value="scontrino"]');
+    if (radioScontrino) radioScontrino.checked = true;
+
+    el.statoScattaRimborso.textContent = '✅ Fatto! Controlla i dati e scegli la modalità di pagamento prima di salvare.';
+    setTimeout(() => el.statoScattaRimborso.classList.add('hidden'), 6000);
+  } catch (err) {
+    el.statoScattaRimborso.textContent = `⚠ Non sono riuscito a leggere lo scontrino (${err.message}). Compila a mano.`;
+  }
 }
 
 function recordGiornoValido(r) {
@@ -3203,6 +3275,7 @@ el.btnEliminaFirma.addEventListener('click', async () => {
 });
 el.btnAddSpesa.addEventListener('click', apriFormSpesa);
 el.btnSpesaFormAnnulla.addEventListener('click', chiudiFormSpesa);
+el.btnScattaRimborso.addEventListener('click', () => apriFotocameraSpesaAI());
 el.inputSpesaEsercente.addEventListener('change', onEsercenteChange);
 el.formSpesa.addEventListener('submit', salvaFormSpesa);
 

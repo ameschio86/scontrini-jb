@@ -92,7 +92,7 @@
       <input type="file" id="input-importa-backup" accept="application/json" class="hidden">
     </div>
 
-    <span id="hub-versione" class="hub-versione">v1.0</span>
+    <span id="hub-versione" class="hub-versione">v1.1</span>
   </section>
 
   <!-- ===================== VISTA DATI FATTURAZIONE ===================== -->
@@ -235,6 +235,9 @@
     </header>
 
     <form id="form-spesa" class="spesa-form">
+      <button type="button" id="btn-scatta-rimborso" class="btn-dettatura-giornata">📷 Scatta e compila</button>
+      <p id="stato-scatta-rimborso" class="stato-dettatura hidden"></p>
+
       <label class="campo-label">Data
         <input type="date" id="input-spesa-data" required>
       </label>
