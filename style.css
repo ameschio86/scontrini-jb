@@ -294,6 +294,17 @@ body {
   margin-top: 8px;
 }
 
+.hub-versione {
+  position: fixed;
+  right: calc(6px + env(safe-area-inset-right));
+  bottom: calc(4px + env(safe-area-inset-bottom));
+  font-size: 0.65rem;
+  color: var(--primary-blue);
+  opacity: 0.6;
+  z-index: 1;
+  pointer-events: none;
+}
+
 .btn-backup-mini {
   background: none;
   border: none;
