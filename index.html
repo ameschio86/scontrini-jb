@@ -69,18 +69,11 @@
           <span class="hub-card-subtitle">Report giornaliero cantieri</span>
         </span>
       </button>
-      <button id="card-scontrini" class="hub-card hub-card-attivo">
-        <span class="hub-card-icon">📷</span>
-        <span class="hub-card-text">
-          <span class="hub-card-title">Scontrini</span>
-          <span class="hub-card-subtitle">Foto e archivio spese</span>
-        </span>
-      </button>
       <button id="card-rimborso" class="hub-card hub-card-attivo">
         <span class="hub-card-icon">💶</span>
         <span class="hub-card-text">
           <span class="hub-card-title">Rimborso</span>
-          <span class="hub-card-subtitle">Registro spese mensile</span>
+          <span class="hub-card-subtitle">Spese, scontrini e rimborsi</span>
         </span>
       </button>
     </div>
@@ -89,10 +82,11 @@
       <button id="btn-esporta-backup" class="btn-backup-mini">💾 Backup</button>
       <button id="btn-importa-backup" class="btn-backup-mini">📂 Ripristina</button>
       <button id="btn-dati-fatturazione" class="btn-backup-mini">🧾 Dati fatturazione</button>
+      <button id="btn-migrazione-scontrini" class="btn-backup-mini">🔄 Unisci Scontrini e Rimborso</button>
       <input type="file" id="input-importa-backup" accept="application/json" class="hidden">
     </div>
 
-    <span id="hub-versione" class="hub-versione">v1.3</span>
+    <span id="hub-versione" class="hub-versione">v1.6</span>
   </section>
 
   <!-- ===================== VISTA DATI FATTURAZIONE ===================== -->
@@ -121,8 +115,8 @@
   <section id="view-dashboard" class="view hidden">
 
     <header class="app-header">
-      <button id="btn-torna-hub" class="btn-back" aria-label="Torna all'hub">← <span class="btn-back-label">BACK</span></button>
-      <h1 class="app-title">Scontrini</h1>
+      <button id="btn-torna-hub" class="btn-back" aria-label="Torna a Rimborso">← <span class="btn-back-label">BACK</span></button>
+      <h1 class="app-title">Archivio storico scontrini</h1>
     </header>
 
 
@@ -214,7 +208,11 @@
     <p id="lista-spese-empty" class="gallery-empty hidden">Nessuna spesa registrata per questo mese.</p>
 
     <!-- Export -->
-    <button id="btn-export-rimborso" class="btn-export">Esporta PDF mese attivo</button>
+    <div class="export-buttons">
+      <button id="btn-export-rimborso" class="btn-export">Esporta PDF Rimborso — mese attivo</button>
+      <button id="btn-export-scontrini-generico" class="btn-export">Esporta scontrini generico — mese attivo</button>
+      <button id="btn-export-scontrini-gasolio" class="btn-export">Esporta scontrini gasolio — mese attivo</button>
+    </div>
 
     <button id="btn-close-month-rimborso" class="btn-close-month">Chiudi mese</button>
 
@@ -225,18 +223,29 @@
       <button id="btn-elimina-firma" class="btn-backup-mini hidden">Elimina firma</button>
     </div>
     <input type="file" id="input-firma-upload" accept="image/*" class="hidden">
+
+    <nav class="secondary-nav">
+      <a href="#" id="link-archivio-storico">🗂 Archivio storico scontrini</a>
+    </nav>
   </section>
 
   <!-- ===================== VISTA FORM SPESA ===================== -->
   <section id="view-spesa-form" class="view hidden">
     <header class="app-header">
       <button id="btn-spesa-form-annulla" class="btn-back" aria-label="Annulla">←</button>
-      <h1 class="app-title">Nuova spesa</h1>
+      <h1 id="titolo-spesa-form" class="app-title">Nuova spesa</h1>
     </header>
 
-    <form id="form-spesa" class="spesa-form">
+    <form id="form-spesa" class="spesa-form" novalidate>
       <button type="button" id="btn-scatta-rimborso" class="btn-dettatura-giornata">📷 Scatta e compila</button>
       <p id="stato-scatta-rimborso" class="stato-dettatura hidden"></p>
+      <img id="anteprima-foto-spesa" class="anteprima-foto-spesa hidden" alt="Foto scontrino allegata">
+
+      <fieldset class="campo-fieldset">
+        <legend>Categoria</legend>
+        <label class="radio-label"><input type="radio" name="categoria-spesa" value="generico" checked> 📷 Generico</label>
+        <label class="radio-label"><input type="radio" name="categoria-spesa" value="gasolio"> ⛽ Gasolio</label>
+      </fieldset>
 
       <label class="campo-label">Data
         <input type="date" id="input-spesa-data" required>
@@ -276,7 +285,7 @@
         <input type="text" id="input-spesa-note">
       </label>
 
-      <button type="submit" class="btn-primary spesa-form-salva">Salva spesa</button>
+      <button type="submit" id="btn-salva-spesa" class="btn-primary spesa-form-salva">Salva spesa</button>
     </form>
   </section>
 

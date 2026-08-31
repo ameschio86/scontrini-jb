@@ -157,6 +157,11 @@ async function eliminaRicevuta(id) {
   return reqAsPromise(store.delete(id));
 }
 
+async function aggiornaRicevuta(ricevuta) {
+  const { store } = await txStore(STORE_RICEVUTE, 'readwrite');
+  return reqAsPromise(store.put(ricevuta));
+}
+
 async function getRicevuteDelMese(meseAnno) {
   const { store } = await txStore(STORE_RICEVUTE, 'readonly');
   const idx = store.index('meseAnno');
@@ -177,6 +182,11 @@ async function salvaSpesa(spesa) {
 async function eliminaSpesa(id) {
   const { store } = await txStore(STORE_SPESE, 'readwrite');
   return reqAsPromise(store.delete(id));
+}
+
+async function aggiornaSpesa(spesa) {
+  const { store } = await txStore(STORE_SPESE, 'readwrite');
+  return reqAsPromise(store.put(spesa));
 }
 
 async function getSpeseDelMese(meseAnno) {
@@ -446,6 +456,105 @@ async function getTuttiIMesi() {
 }
 
 /* =========================================================
+   MIGRAZIONE SCONTRINI → RIMBORSO (fusione dei due moduli)
+   ========================================================= */
+
+async function calcolaPianoMigrazione() {
+  const [ricevute, spese] = await Promise.all([getTutteLeRicevute(), getTutteLeSpese()]);
+  const ricevuteDaMigrare = ricevute.filter(r => !r.migrata);
+  const speseScontrino = spese.filter(s => s.giustificativo === 'scontrino');
+
+  const ricevutePerData = new Map();
+  for (const r of ricevuteDaMigrare) {
+    const chiave = r.dataScontrino || r.timestamp.slice(0, 10);
+    if (!ricevutePerData.has(chiave)) ricevutePerData.set(chiave, []);
+    ricevutePerData.get(chiave).push(r);
+  }
+  const spesePerData = new Map();
+  for (const s of speseScontrino) {
+    if (!spesePerData.has(s.data)) spesePerData.set(s.data, []);
+    spesePerData.get(s.data).push(s);
+  }
+
+  const tutteLeDate = new Set([...ricevutePerData.keys(), ...spesePerData.keys()]);
+  const piano = { abbinamenti: [], nuoveSpese: [], senzaFoto: [], ambiguita: [] };
+
+  for (const data of tutteLeDate) {
+    const rList = ricevutePerData.get(data) || [];
+    const sList = spesePerData.get(data) || [];
+    if (rList.length === 1 && sList.length === 1) {
+      piano.abbinamenti.push({ ricevuta: rList[0], spesa: sList[0] });
+    } else if (rList.length === 1 && sList.length === 0) {
+      piano.nuoveSpese.push(rList[0]);
+    } else if (rList.length === 0 && sList.length === 1) {
+      piano.senzaFoto.push(sList[0]);
+    } else {
+      piano.ambiguita.push({ data, ricevute: rList, spese: sList });
+    }
+  }
+  return piano;
+}
+
+function formattaReportMigrazione(piano) {
+  const righe = [
+    `${piano.abbinamenti.length} abbinamenti automatici (foto + rimborso già esistente, stesso giorno)`,
+    `${piano.nuoveSpese.length} scontrini senza rimborso corrispondente (verranno creati come nuove spese "da completare")`,
+    `${piano.senzaFoto.length} spese-scontrino senza foto collegata (restano invariate)`,
+    `${piano.ambiguita.length} date ambigue da rivedere a mano (nessuna azione automatica)`
+  ];
+  let testo = righe.map(r => '• ' + r).join('\n');
+  if (piano.ambiguita.length > 0) {
+    const elenco = piano.ambiguita
+      .map(a => `${a.data} (${a.ricevute.length} foto / ${a.spese.length} spese)`)
+      .join(', ');
+    testo += `\n\nDate ambigue: ${elenco}`;
+  }
+  return testo;
+}
+
+async function eseguiMigrazioneScontriniRimborso() {
+  const piano = await calcolaPianoMigrazione();
+
+  if (piano.abbinamenti.length === 0 && piano.nuoveSpese.length === 0 && piano.ambiguita.length === 0) {
+    alert(`Nessuna migrazione da fare: non ci sono scontrini da unire ai rimborsi.${piano.senzaFoto.length ? ` (${piano.senzaFoto.length} spese-scontrino restano senza foto collegata, come già oggi.)` : ''}`);
+    return;
+  }
+
+  const report = formattaReportMigrazione(piano);
+  const procedi = await chiediConferma(
+    `${report}\n\nProcedere con la migrazione? I vecchi scontrini restano comunque consultabili nell'Archivio storico: questa operazione non cancella nulla.`
+  );
+  if (!procedi) return;
+
+  for (const { ricevuta, spesa } of piano.abbinamenti) {
+    await aggiornaSpesa({ ...spesa, categoria: ricevuta.categoria, immagine: ricevuta.immagine });
+    await aggiornaRicevuta({ ...ricevuta, migrata: true });
+  }
+
+  for (const ricevuta of piano.nuoveSpese) {
+    const dataSpesa = ricevuta.dataScontrino || ricevuta.timestamp.slice(0, 10);
+    await salvaSpesa({
+      meseAnno: ricevuta.meseAnno,
+      data: dataSpesa,
+      esercente: '',
+      luogo: '',
+      descrizione: '',
+      giustificativo: 'scontrino',
+      pagamento: '',
+      importo: 0,
+      note: 'Da completare — migrato da Scontrini (nessun rimborso corrispondente trovato).',
+      categoria: ricevuta.categoria,
+      immagine: ricevuta.immagine,
+      provenienza: 'migrata',
+      creatoIl: new Date().toISOString()
+    });
+    await aggiornaRicevuta({ ...ricevuta, migrata: true });
+  }
+
+  alert(`Migrazione completata.\n\n${report}`);
+}
+
+/* =========================================================
    STATO APPLICAZIONE
    ========================================================= */
 
@@ -465,7 +574,9 @@ const stato = {
   anagraficaCorrente: null,
   tappeCounter: 0,
   giornoInModifica: null,
-  formSpesaOrigine: 'rimborso'
+  formSpesaOrigine: 'rimborso',
+  spesaInModifica: null,
+  fotoSpesaCorrente: null
 };
 
 /* =========================================================
@@ -476,9 +587,9 @@ const el = {
   splashScreen: document.getElementById('splash-screen'),
   viewHub: document.getElementById('view-hub'),
   selectDipendente: document.getElementById('select-dipendente'),
-  cardScontrini: document.getElementById('card-scontrini'),
   cardRimborso: document.getElementById('card-rimborso'),
   cardAttivita: document.getElementById('card-attivita'),
+  btnMigrazioneScontrini: document.getElementById('btn-migrazione-scontrini'),
 
   viewAttivita: document.getElementById('view-attivita'),
   btnTornaHubAttivita: document.getElementById('btn-torna-hub-attivita'),
@@ -555,12 +666,18 @@ const el = {
   listaSpeseEmpty: document.getElementById('lista-spese-empty'),
   totaleCarta: document.getElementById('totale-carta'),
   totaleDipendente: document.getElementById('totale-dipendente'),
+  btnExportScontriniGenerico: document.getElementById('btn-export-scontrini-generico'),
+  btnExportScontriniGasolio: document.getElementById('btn-export-scontrini-gasolio'),
+  linkArchivioStorico: document.getElementById('link-archivio-storico'),
 
   viewSpesaForm: document.getElementById('view-spesa-form'),
   formSpesa: document.getElementById('form-spesa'),
+  titoloSpesaForm: document.getElementById('titolo-spesa-form'),
+  btnSalvaSpesa: document.getElementById('btn-salva-spesa'),
   btnSpesaFormAnnulla: document.getElementById('btn-spesa-form-annulla'),
   btnScattaRimborso: document.getElementById('btn-scatta-rimborso'),
   statoScattaRimborso: document.getElementById('stato-scatta-rimborso'),
+  anteprimaFotoSpesa: document.getElementById('anteprima-foto-spesa'),
   inputSpesaData: document.getElementById('input-spesa-data'),
   inputSpesaEsercente: document.getElementById('input-spesa-esercente'),
   listaEsercenti: document.getElementById('lista-esercenti'),
@@ -1117,8 +1234,6 @@ async function confermaRifinisci() {
     await mostraFlash(el.rifinisciFlash);
     chiudiRifinisci();
     await aggiornaDashboard();
-
-    await precompilaRimborsoDaFoto(blob);
   } finally {
     el.rifinisciLoading.classList.add('hidden');
   }
@@ -1166,15 +1281,9 @@ function caricaImmagine(dataUrl) {
   });
 }
 
-async function esportaPdf(categoria, meseAnno) {
-  // Il rimborso ("generico") include anche gli scontrini gasolio: un gasolio
-  // e' comunque un rimborso, oltre a comparire nel suo export specifico.
-  const ricevute = categoria === 'generico'
-    ? await getRicevuteDelMese(meseAnno)
-    : await getRicevuteDelMesePerCategoria(meseAnno, categoria);
-
-  if (ricevute.length === 0) {
-    alert(`Nessuna ricevuta ${categoria === 'gasolio' ? 'gasolio' : 'rimborso'} da esportare per ${etichettaMese(meseAnno)}.`);
+async function esportaFotoBooklet(immagini, nomeFile, messaggioVuoto) {
+  if (immagini.length === 0) {
+    alert(messaggioVuoto);
     return;
   }
 
@@ -1184,10 +1293,10 @@ async function esportaPdf(categoria, meseAnno) {
   const pageH = doc.internal.pageSize.getHeight();
   const margine = 10;
 
-  for (let i = 0; i < ricevute.length; i++) {
+  for (let i = 0; i < immagini.length; i++) {
     if (i > 0) doc.addPage();
 
-    const dataUrl = await blobADataUrl(ricevute[i].immagine);
+    const dataUrl = await blobADataUrl(immagini[i]);
     const img = await caricaImmagine(dataUrl);
 
     const maxW = pageW - margine * 2;
@@ -1201,7 +1310,37 @@ async function esportaPdf(categoria, meseAnno) {
     doc.addImage(dataUrl, 'JPEG', x, y, w, h);
   }
 
-  doc.save(nomeFileExport(categoria, meseAnno));
+  doc.save(nomeFile);
+}
+
+async function esportaPdf(categoria, meseAnno) {
+  // Il rimborso ("generico") include anche gli scontrini gasolio: un gasolio
+  // e' comunque un rimborso, oltre a comparire nel suo export specifico.
+  const ricevute = categoria === 'generico'
+    ? await getRicevuteDelMese(meseAnno)
+    : await getRicevuteDelMesePerCategoria(meseAnno, categoria);
+
+  await esportaFotoBooklet(
+    ricevute.map(r => r.immagine),
+    nomeFileExport(categoria, meseAnno),
+    `Nessuna ricevuta ${categoria === 'gasolio' ? 'gasolio' : 'rimborso'} da esportare per ${etichettaMese(meseAnno)}.`
+  );
+}
+
+async function getSpeseConFotoDelMese(meseAnno, categoria = null) {
+  const spese = await getSpeseDelMese(meseAnno);
+  return spese.filter(s => s.immagine && (categoria === null || s.categoria === categoria));
+}
+
+async function esportaScontriniDaSpese(categoria, meseAnno) {
+  // Lo stesso principio di esportaPdf: "generico" include anche i gasolio.
+  const spese = await getSpeseConFotoDelMese(meseAnno, categoria === 'generico' ? null : categoria);
+
+  await esportaFotoBooklet(
+    spese.map(s => s.immagine),
+    nomeFileExport(categoria, meseAnno),
+    `Nessuno scontrino ${categoria === 'gasolio' ? 'gasolio' : ''} da esportare per ${etichettaMese(meseAnno)}.`
+  );
 }
 
 /* =========================================================
@@ -1305,14 +1444,15 @@ function inizializzaDipendente() {
   if (salvato) el.selectDipendente.value = salvato;
 }
 
-function apriScontrini() {
-  el.viewHub.classList.add('hidden');
+async function apriArchivioStorico() {
+  el.viewRimborso.classList.add('hidden');
   el.viewDashboard.classList.remove('hidden');
+  await aggiornaDashboard();
 }
 
 function tornaAllHub() {
   el.viewDashboard.classList.add('hidden');
-  el.viewHub.classList.remove('hidden');
+  el.viewRimborso.classList.remove('hidden');
 }
 
 function apriFatturazione() {
@@ -1951,25 +2091,38 @@ function applicaDatiScontrinoAlForm(risultato) {
   if (risultato.luogo) el.inputSpesaLuogo.value = risultato.luogo;
   if (risultato.descrizione) el.inputSpesaDescrizione.value = risultato.descrizione;
   if (risultato.importo) el.inputSpesaImporto.value = risultato.importo;
-  const radioScontrino = document.querySelector('input[name="giustificativo"][value="scontrino"]');
-  if (radioScontrino) radioScontrino.checked = true;
+  // Il giustificativo si autocompila SOLO se l'IA lo riconosce chiaramente dal
+  // documento (es. scritto "FATTURA" con tanto di dati del cliente, oppure il
+  // classico scontrino fiscale da cassa): in caso di dubbio resta da scegliere a
+  // mano, perché fotografare uno scontrino non esclude che poi arrivi una fattura.
+  if (risultato.giustificativo === 'fattura' || risultato.giustificativo === 'scontrino') {
+    const radio = document.querySelector(`input[name="giustificativo"][value="${risultato.giustificativo}"]`);
+    if (radio) radio.checked = true;
+  }
+
+  const dettagliGasolio = [];
+  if (risultato.targa) dettagliGasolio.push(`Targa ${risultato.targa}`);
+  if (risultato.chilometri) dettagliGasolio.push(`${risultato.chilometri} km`);
+  if (dettagliGasolio.length > 0) el.inputSpesaNote.value = dettagliGasolio.join(' · ');
 }
 
-async function archiviaScontrinoLetto(risultato, blob) {
-  const categoria = risultato.categoria === 'gasolio' ? 'gasolio' : 'generico';
-  const statoMeseScontrini = await getStatoMese(stato.meseAttivo);
-  if (statoMeseScontrini.chiuso) {
-    return `il mese ${etichettaMese(stato.meseAttivo)} degli Scontrini è chiuso, la foto non è stata archiviata`;
+function impostaCategoriaSpesa(categoria) {
+  const radio = document.querySelector(`input[name="categoria-spesa"][value="${categoria === 'gasolio' ? 'gasolio' : 'generico'}"]`);
+  if (radio) radio.checked = true;
+}
+
+function aggiornaAnteprimaFotoSpesa() {
+  if (stato.fotoSpesaCorrente) {
+    el.anteprimaFotoSpesa.src = URL.createObjectURL(stato.fotoSpesaCorrente);
+    el.anteprimaFotoSpesa.classList.remove('hidden');
+  } else {
+    el.anteprimaFotoSpesa.classList.add('hidden');
   }
-  await salvaRicevuta({
-    categoria,
-    timestamp: new Date().toISOString(),
-    meseAnno: stato.meseAttivo,
-    dataScontrino: risultato.data || dataISOCorrente(),
-    immagine: blob
-  });
-  await aggiornaDashboard();
-  return `foto archiviata in Scontrini · ${categoria === 'gasolio' ? 'Gasolio' : 'Generico'}`;
+}
+
+function impostaFotoSpesa(blob) {
+  stato.fotoSpesaCorrente = blob;
+  aggiornaAnteprimaFotoSpesa();
 }
 
 async function elaboraScontrinoAI(canvas) {
@@ -1981,26 +2134,13 @@ async function elaboraScontrinoAI(canvas) {
     const risultato = await richiediLetturaScontrino(blob);
 
     applicaDatiScontrinoAlForm(risultato);
-    const messaggioArchiviazione = await archiviaScontrinoLetto(risultato, blob);
+    impostaCategoriaSpesa(risultato.categoria);
+    impostaFotoSpesa(blob);
 
-    el.statoScattaRimborso.textContent = `✅ Fatto! ${messaggioArchiviazione}. Controlla i dati e scegli la modalità di pagamento prima di salvare.`;
+    el.statoScattaRimborso.textContent = '✅ Fatto! Controlla i dati e la categoria, poi scegli fattura/scontrino e la modalità di pagamento prima di salvare.';
     setTimeout(() => el.statoScattaRimborso.classList.add('hidden'), 7000);
   } catch (err) {
     el.statoScattaRimborso.textContent = `⚠ Non sono riuscito a leggere lo scontrino (${err.message}). Compila a mano.`;
-  }
-}
-
-async function precompilaRimborsoDaFoto(blob) {
-  try {
-    const risultato = await richiediLetturaScontrino(blob);
-    await apriFormSpesa('scontrini');
-    applicaDatiScontrinoAlForm(risultato);
-    el.statoScattaRimborso.classList.remove('hidden');
-    el.statoScattaRimborso.textContent = '✅ Rimborso precompilato dallo scontrino appena archiviato. Controlla i dati e scegli la modalità di pagamento (o annulla se questo scontrino non serve a rimborso).';
-    setTimeout(() => el.statoScattaRimborso.classList.add('hidden'), 9000);
-  } catch (err) {
-    // Silenzioso: lo scontrino è già stato archiviato correttamente in Scontrini,
-    // questo è solo un tentativo automatico in più — se fallisce si compila a mano come prima.
   }
 }
 
@@ -2598,7 +2738,6 @@ el.selectDipendente.addEventListener('change', async () => {
   stato.meseAttivoAttivita = await determinaMeseAttivoAttivitaIniziale(el.selectDipendente.value);
 });
 
-el.cardScontrini.addEventListener('click', apriScontrini);
 el.cardRimborso.addEventListener('click', apriRimborso);
 el.cardAttivita.addEventListener('click', apriAttivita);
 el.btnTornaHub.addEventListener('click', tornaAllHub);
@@ -2698,24 +2837,27 @@ async function aggiornaRimborso() {
   el.totaleCarta.textContent = formatoImporto(totaleCarta);
   el.totaleDipendente.textContent = formatoImporto(totaleOggettoRimborso);
 
-  renderListaSpese(spese);
+  renderListaSpese(spese, chiuso);
   await aggiornaStatoFirma();
 }
 
-function renderListaSpese(spese) {
+function renderListaSpese(spese, meseChiuso) {
   el.listaSpese.innerHTML = '';
   el.listaSpeseEmpty.classList.toggle('hidden', spese.length > 0);
 
   for (const s of spese) {
-    const div = document.createElement('div');
-    div.className = 'spesa-item';
+    const item = document.createElement('div');
+    item.className = 'giorno-item';
+
+    const header = document.createElement('div');
+    header.className = 'giorno-item-header';
 
     const info = document.createElement('div');
     info.className = 'spesa-item-info';
 
     const titolo = document.createElement('span');
     titolo.className = 'spesa-item-titolo';
-    titolo.textContent = `${parseDataISO(s.data).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })} · ${s.esercente}`;
+    titolo.textContent = `${parseDataISO(s.data).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })} · ${s.esercente || '(da completare)'}`;
     info.appendChild(titolo);
 
     const dettaglioParti = [s.luogo, s.descrizione, etichettaPagamento(s.pagamento)].filter(Boolean);
@@ -2724,15 +2866,69 @@ function renderListaSpese(spese) {
     dettaglio.textContent = dettaglioParti.join(' · ');
     info.appendChild(dettaglio);
 
-    div.appendChild(info);
+    header.appendChild(info);
 
     const importo = document.createElement('span');
     importo.className = 'spesa-item-importo';
     importo.textContent = formatoImporto(s.importo);
-    div.appendChild(importo);
+    header.appendChild(importo);
 
-    div.addEventListener('click', () => eliminaSpesaConferma(s));
-    el.listaSpese.appendChild(div);
+    item.appendChild(header);
+
+    const dettaglioEspanso = document.createElement('div');
+    dettaglioEspanso.className = 'giorno-item-dettaglio-espanso hidden';
+
+    if (s.immagine) {
+      const img = document.createElement('img');
+      img.className = 'spesa-foto-anteprima';
+      img.src = URL.createObjectURL(s.immagine);
+      img.loading = 'lazy';
+      dettaglioEspanso.appendChild(img);
+    }
+
+    const campiTesto = [
+      s.categoria === 'gasolio' ? '⛽ Gasolio' : s.categoria === 'generico' ? '📷 Generico' : null,
+      s.giustificativo === 'scontrino' ? 'Scontrino' : 'Fattura',
+      etichettaPagamento(s.pagamento),
+      s.note
+    ].filter(Boolean);
+    const riga = document.createElement('p');
+    riga.className = 'giorno-riga-dettaglio';
+    riga.textContent = campiTesto.join(' · ');
+    dettaglioEspanso.appendChild(riga);
+
+    const rigaAzioni = document.createElement('div');
+    rigaAzioni.className = 'giorno-azioni-espanse';
+
+    const btnModifica = document.createElement('button');
+    btnModifica.type = 'button';
+    btnModifica.className = 'btn-secondary';
+    btnModifica.textContent = '✏️ Modifica';
+    btnModifica.disabled = meseChiuso;
+    btnModifica.addEventListener('click', (e) => {
+      e.stopPropagation();
+      apriFormSpesa('rimborso', s);
+    });
+    rigaAzioni.appendChild(btnModifica);
+
+    const btnElimina = document.createElement('button');
+    btnElimina.type = 'button';
+    btnElimina.className = 'btn-elimina-giorno';
+    btnElimina.textContent = '🗑 Elimina';
+    btnElimina.addEventListener('click', (e) => {
+      e.stopPropagation();
+      eliminaSpesaConferma(s);
+    });
+    rigaAzioni.appendChild(btnElimina);
+
+    dettaglioEspanso.appendChild(rigaAzioni);
+    item.appendChild(dettaglioEspanso);
+
+    header.addEventListener('click', () => {
+      dettaglioEspanso.classList.toggle('hidden');
+    });
+
+    el.listaSpese.appendChild(item);
   }
 }
 
@@ -3260,10 +3456,51 @@ async function onEsercenteChange() {
   }
 }
 
-async function apriFormSpesa(origine = 'rimborso') {
+function contenitoreValidazione(campo) {
+  return campo.closest('fieldset') || campo;
+}
+
+function evidenziaCampoNonValido(campo) {
+  contenitoreValidazione(campo).classList.add('campo-errore');
+}
+
+function pulisciEvidenziazioneForm(form) {
+  form.querySelectorAll('.campo-errore').forEach(c => c.classList.remove('campo-errore'));
+}
+
+async function apriFormSpesa(origine = 'rimborso', spesaEsistente = null) {
   stato.formSpesaOrigine = origine;
+  stato.spesaInModifica = spesaEsistente;
   el.formSpesa.reset();
-  el.inputSpesaData.value = dataISOCorrente();
+  pulisciEvidenziazioneForm(el.formSpesa);
+
+  el.titoloSpesaForm.textContent = spesaEsistente ? 'Modifica spesa' : 'Nuova spesa';
+  el.btnSalvaSpesa.textContent = spesaEsistente ? 'Salva modifiche' : 'Salva spesa';
+
+  if (spesaEsistente) {
+    stato.fotoSpesaCorrente = spesaEsistente.immagine || null;
+    el.inputSpesaData.value = spesaEsistente.data;
+    el.inputSpesaEsercente.value = spesaEsistente.esercente || '';
+    el.inputSpesaLuogo.value = spesaEsistente.luogo || '';
+    el.inputSpesaDescrizione.value = spesaEsistente.descrizione || '';
+    el.inputSpesaImporto.value = spesaEsistente.importo || '';
+    el.inputSpesaNote.value = spesaEsistente.note || '';
+    if (spesaEsistente.giustificativo) {
+      const r = document.querySelector(`input[name="giustificativo"][value="${spesaEsistente.giustificativo}"]`);
+      if (r) r.checked = true;
+    }
+    if (spesaEsistente.pagamento) {
+      const r = document.querySelector(`input[name="pagamento"][value="${spesaEsistente.pagamento}"]`);
+      if (r) r.checked = true;
+    }
+    impostaCategoriaSpesa(spesaEsistente.categoria);
+  } else {
+    stato.fotoSpesaCorrente = null;
+    el.inputSpesaData.value = dataISOCorrente();
+    impostaCategoriaSpesa('generico');
+  }
+  aggiornaAnteprimaFotoSpesa();
+
   await aggiornaListaEsercenti();
   el.viewRimborso.classList.add('hidden');
   el.viewDashboard.classList.add('hidden');
@@ -3271,6 +3508,8 @@ async function apriFormSpesa(origine = 'rimborso') {
 }
 
 function chiudiFormSpesa() {
+  stato.spesaInModifica = null;
+  stato.fotoSpesaCorrente = null;
   el.viewSpesaForm.classList.add('hidden');
   if (stato.formSpesaOrigine === 'scontrini') {
     el.viewDashboard.classList.remove('hidden');
@@ -3282,11 +3521,43 @@ function chiudiFormSpesa() {
 async function salvaFormSpesa(e) {
   e.preventDefault();
 
+  pulisciEvidenziazioneForm(el.formSpesa);
+
   const giustificativoEl = el.formSpesa.querySelector('input[name="giustificativo"]:checked');
   const pagamentoEl = el.formSpesa.querySelector('input[name="pagamento"]:checked');
+  const categoriaEl = el.formSpesa.querySelector('input[name="categoria-spesa"]:checked');
+
+  const campiMancanti = [];
+  if (!el.inputSpesaData.value) {
+    evidenziaCampoNonValido(el.inputSpesaData);
+    campiMancanti.push('Data');
+  }
+  if (!el.inputSpesaEsercente.value.trim()) {
+    evidenziaCampoNonValido(el.inputSpesaEsercente);
+    campiMancanti.push('Esercente');
+  }
+  if (!giustificativoEl) {
+    evidenziaCampoNonValido(el.formSpesa.querySelector('input[name="giustificativo"]'));
+    campiMancanti.push('Giustificativo (Fattura/Scontrino)');
+  }
+  if (!pagamentoEl) {
+    evidenziaCampoNonValido(el.formSpesa.querySelector('input[name="pagamento"]'));
+    campiMancanti.push('Modalità di pagamento');
+  }
+  if (!el.inputSpesaImporto.value || Number.isNaN(parseFloat(el.inputSpesaImporto.value))) {
+    evidenziaCampoNonValido(el.inputSpesaImporto);
+    campiMancanti.push('Importo');
+  }
+
+  if (campiMancanti.length > 0) {
+    el.statoScattaRimborso.classList.remove('hidden');
+    el.statoScattaRimborso.textContent = `⚠ Completa i campi evidenziati prima di salvare: ${campiMancanti.join(', ')}.`;
+    el.formSpesa.querySelector('.campo-errore').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
 
   const spesa = {
-    meseAnno: stato.meseAttivoRimborso,
+    meseAnno: stato.spesaInModifica ? stato.spesaInModifica.meseAnno : stato.meseAttivoRimborso,
     data: el.inputSpesaData.value,
     esercente: el.inputSpesaEsercente.value.trim(),
     luogo: el.inputSpesaLuogo.value.trim(),
@@ -3295,10 +3566,18 @@ async function salvaFormSpesa(e) {
     pagamento: pagamentoEl.value,
     importo: Math.round(parseFloat(el.inputSpesaImporto.value) * 100) / 100,
     note: el.inputSpesaNote.value.trim(),
-    creatoIl: new Date().toISOString()
+    categoria: categoriaEl ? categoriaEl.value : null,
+    immagine: stato.fotoSpesaCorrente || null,
+    provenienza: stato.spesaInModifica ? (stato.spesaInModifica.provenienza || null) : null,
+    creatoIl: stato.spesaInModifica ? stato.spesaInModifica.creatoIl : new Date().toISOString()
   };
 
-  await salvaSpesa(spesa);
+  if (stato.spesaInModifica) {
+    spesa.id = stato.spesaInModifica.id;
+    await aggiornaSpesa(spesa);
+  } else {
+    await salvaSpesa(spesa);
+  }
   chiudiFormSpesa();
   await aggiornaRimborso();
 }
@@ -3309,6 +3588,9 @@ el.btnNextMonthRimborso.addEventListener('click', () => cambiaMeseRimborso(1));
 el.btnReopenMonthRimborso.addEventListener('click', riapriMeseRimborso);
 el.btnCloseMonthRimborso.addEventListener('click', chiudiMeseRimborso);
 el.btnExportRimborso.addEventListener('click', () => generaPdfRimborso(stato.meseAttivoRimborso));
+el.btnExportScontriniGenerico.addEventListener('click', () => esportaScontriniDaSpese('generico', stato.meseAttivoRimborso));
+el.btnExportScontriniGasolio.addEventListener('click', () => esportaScontriniDaSpese('gasolio', stato.meseAttivoRimborso));
+el.linkArchivioStorico.addEventListener('click', (e) => { e.preventDefault(); apriArchivioStorico(); });
 el.btnCaricaFirma.addEventListener('click', () => el.inputFirmaUpload.click());
 el.inputFirmaUpload.addEventListener('change', async () => {
   const file = el.inputFirmaUpload.files[0];
@@ -3328,6 +3610,8 @@ el.btnSpesaFormAnnulla.addEventListener('click', chiudiFormSpesa);
 el.btnScattaRimborso.addEventListener('click', () => apriFotocameraSpesaAI());
 el.inputSpesaEsercente.addEventListener('change', onEsercenteChange);
 el.formSpesa.addEventListener('submit', salvaFormSpesa);
+el.formSpesa.addEventListener('input', (e) => contenitoreValidazione(e.target).classList.remove('campo-errore'));
+el.formSpesa.addEventListener('change', (e) => contenitoreValidazione(e.target).classList.remove('campo-errore'));
 
 /* =========================================================
    BACKUP COMPLETO (esporta/ripristina tutti i dati)
@@ -3502,6 +3786,7 @@ async function ripristinaDaTesto(testo) {
   stato.meseAttivoAttivita = await determinaMeseAttivoAttivitaIniziale(localStorage.getItem('dipendenteAttivo'));
 }
 
+el.btnMigrazioneScontrini.addEventListener('click', eseguiMigrazioneScontriniRimborso);
 el.btnEsportaBackup.addEventListener('click', esportaBackupCompleto);
 el.btnImportaBackup.addEventListener('click', () => el.inputImportaBackup.click());
 el.inputImportaBackup.addEventListener('change', async () => {

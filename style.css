@@ -849,10 +849,41 @@ body {
   font-size: 0.95rem;
 }
 
+.campo-errore {
+  border-color: var(--danger) !important;
+  border-width: 2px !important;
+}
+
+.campo-fieldset.campo-errore legend {
+  color: var(--danger);
+}
+
 .spesa-form-salva {
   padding: 14px;
   font-size: 1rem;
   margin-top: 4px;
+}
+
+.anteprima-foto-spesa {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-light);
+  background: var(--bg-light);
+  margin-top: -6px;
+  margin-bottom: 8px;
+}
+
+.spesa-foto-anteprima {
+  display: block;
+  width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  border-radius: 10px;
+  border: 1px solid var(--border-light);
+  background: var(--bg-light);
 }
 
 /* ---------- Firma ---------- */
