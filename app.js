@@ -462,7 +462,8 @@ const stato = {
   meseAttivoAttivita: meseAnnoCorrente(),
   anagraficaClienti: [],
   anagraficaCorrente: null,
-  tappeCounter: 0
+  tappeCounter: 0,
+  giornoInModifica: null
 };
 
 /* =========================================================
@@ -520,6 +521,8 @@ const el = {
   listaTappe: document.getElementById('lista-tappe'),
   btnAggiungiTappa: document.getElementById('btn-aggiungi-tappa'),
   avvisoMultiCliente: document.getElementById('avviso-multi-cliente'),
+  titoloGiornoForm: document.getElementById('titolo-giorno-form'),
+  btnSalvaGiorno: document.getElementById('btn-salva-giorno'),
 
   btnEsportaBackup: document.getElementById('btn-esporta-backup'),
   btnImportaBackup: document.getElementById('btn-importa-backup'),
@@ -1324,10 +1327,10 @@ async function aggiornaAttivita() {
   el.btnAddGiorno.disabled = chiuso;
   el.btnReopenMonthAttivita.classList.toggle('hidden', !chiuso);
 
-  renderListaGiorniAttivita(giorni);
+  renderListaGiorniAttivita(giorni, chiuso);
 }
 
-function renderListaGiorniAttivita(giorni) {
+function renderListaGiorniAttivita(giorni, meseChiuso) {
   el.listaGiorniAttivita.innerHTML = '';
   el.listaGiorniAttivitaEmpty.classList.toggle('hidden', giorni.length > 0);
 
@@ -1394,6 +1397,20 @@ function renderListaGiorniAttivita(giorni) {
       dettaglioEspanso.appendChild(riga);
     }
 
+    const rigaAzioni = document.createElement('div');
+    rigaAzioni.className = 'giorno-azioni-espanse';
+
+    const btnModifica = document.createElement('button');
+    btnModifica.type = 'button';
+    btnModifica.className = 'btn-secondary';
+    btnModifica.textContent = '✏️ Modifica';
+    btnModifica.disabled = meseChiuso;
+    btnModifica.addEventListener('click', (e) => {
+      e.stopPropagation();
+      apriGiornoForm(g);
+    });
+    rigaAzioni.appendChild(btnModifica);
+
     const btnElimina = document.createElement('button');
     btnElimina.type = 'button';
     btnElimina.className = 'btn-elimina-giorno';
@@ -1402,7 +1419,9 @@ function renderListaGiorniAttivita(giorni) {
       e.stopPropagation();
       eliminaGiornoAttivitaConferma(g);
     });
-    dettaglioEspanso.appendChild(btnElimina);
+    rigaAzioni.appendChild(btnElimina);
+
+    dettaglioEspanso.appendChild(rigaAzioni);
 
     item.appendChild(dettaglioEspanso);
 
@@ -1709,15 +1728,25 @@ function popolaSelectClienti(selectEl, includiPermesso = false) {
   }
 }
 
-async function apriGiornoForm() {
+function estraiNoteSemplice(nota, prefisso) {
+  if (!nota) return '';
+  const conTrattino = `${prefisso} - `;
+  return nota.startsWith(conTrattino) ? nota.slice(conTrattino.length) : '';
+}
+
+async function apriGiornoForm(giornoEsistente = null) {
   const dipendente = localStorage.getItem('dipendenteAttivo');
   if (!dipendente) {
     alert('Seleziona prima un dipendente nell\'hub.');
     return;
   }
 
+  stato.giornoInModifica = giornoEsistente;
+  el.titoloGiornoForm.textContent = giornoEsistente ? 'Modifica giornata' : 'Nuova giornata';
+  el.btnSalvaGiorno.textContent = giornoEsistente ? 'Salva modifiche' : 'Salva giornata';
+
   el.formGiorno.reset();
-  el.inputGiornoData.value = dataISOCorrente();
+  el.inputGiornoData.value = giornoEsistente ? giornoEsistente.data : dataISOCorrente();
   el.bloccoFerie.classList.add('hidden');
   el.bloccoMalattia.classList.add('hidden');
   el.bloccoInfortunio.classList.add('hidden');
@@ -1728,7 +1757,7 @@ async function apriGiornoForm() {
 
   stato.anagraficaCorrente = await getAnagraficaAttivita(dipendente);
 
-  if (stato.anagraficaCorrente.clienti.length === 0) {
+  if (!giornoEsistente && stato.anagraficaCorrente.clienti.length === 0) {
     const vaiAnagrafica = await chiediConferma('Non hai ancora nessun cliente in anagrafica. Vuoi aggiungerlo ora?');
     if (vaiAnagrafica) {
       await apriAnagrafica();
@@ -1738,13 +1767,40 @@ async function apriGiornoForm() {
 
   popolaSelectClienti(el.selectSmartCliente);
   stato.tappeCounter = 0;
-  aggiungiTappaVuota();
+
+  if (!giornoEsistente) {
+    aggiungiTappaVuota();
+  } else {
+    const radio = document.querySelector(`input[name="tipo-giorno"][value="${giornoEsistente.tipoGiorno}"]`);
+    radio.checked = true;
+    radio.dispatchEvent(new Event('change'));
+
+    const primaRiga = giornoEsistente.righe[0];
+    if (giornoEsistente.tipoGiorno === 'ferie') {
+      el.inputFerieLuogo.value = estraiNoteSemplice(primaRiga.note, 'FERIE');
+    } else if (giornoEsistente.tipoGiorno === 'malattia') {
+      el.inputMalattiaNote.value = estraiNoteSemplice(primaRiga.note, 'MALATTIA');
+    } else if (giornoEsistente.tipoGiorno === 'infortunio') {
+      el.inputInfortunioNote.value = estraiNoteSemplice(primaRiga.note, 'INFORTUNIO');
+    } else if (giornoEsistente.tipoGiorno === 'smart') {
+      el.selectSmartCliente.value = primaRiga.cliente;
+      el.inputSmartNote.value = primaRiga.note || '';
+    } else {
+      for (const riga of giornoEsistente.righe) {
+        aggiungiTappaVuota();
+        popolaTappaDaRiga(el.listaTappe.lastElementChild, riga);
+      }
+      aggiornaAvvisoMultiCliente();
+      aggiornaOrariTappe();
+    }
+  }
 
   el.viewAttivita.classList.add('hidden');
   el.viewGiornoForm.classList.remove('hidden');
 }
 
 function chiudiGiornoForm() {
+  stato.giornoInModifica = null;
   el.viewGiornoForm.classList.add('hidden');
   el.viewAttivita.classList.remove('hidden');
 }
@@ -1808,32 +1864,19 @@ function aggiornaOrariTappe() {
   });
 }
 
-function aggiornaCantieriTappa(nomeCliente, codice, datalist) {
-  datalist.innerHTML = '';
+function popolaSelectCantieri(nomeCliente, selectCantiere) {
+  selectCantiere.innerHTML = '<option value="" disabled selected>— Seleziona —</option>';
   const cliente = stato.anagraficaCorrente.clienti.find(c => c.nome === nomeCliente);
-  const sc = cliente ? cliente.sottoclienti.find(s => s.codice === codice) : null;
-  if (!sc) return;
-  for (const cantiere of sc.cantieri) {
-    const opt = document.createElement('option');
-    opt.value = cantiere;
-    datalist.appendChild(opt);
-  }
-}
-
-function aggiornaCodiciTappa(selectCliente, selectCodice, datalist) {
-  const cliente = stato.anagraficaCorrente.clienti.find(c => c.nome === selectCliente.value);
-  selectCodice.innerHTML = '';
   if (!cliente) return;
-  cliente.sottoclienti.forEach((sc) => {
-    const opt = document.createElement('option');
-    opt.value = sc.codice;
-    opt.textContent = sc.codice;
-    selectCodice.appendChild(opt);
-  });
-  if (cliente.sottoclienti.length === 1) {
-    selectCodice.value = cliente.sottoclienti[0].codice;
+  for (const sc of cliente.sottoclienti) {
+    for (const cantiere of sc.cantieri) {
+      const opt = document.createElement('option');
+      opt.value = cantiere;
+      opt.textContent = cantiere;
+      opt.dataset.codice = sc.codice;
+      selectCantiere.appendChild(opt);
+    }
   }
-  aggiornaCantieriTappa(selectCliente.value, selectCodice.value, datalist);
 }
 
 function aggiungiTappaVuota() {
@@ -1902,27 +1945,23 @@ function aggiungiTappaVuota() {
   abilitaArrotondamentoOraIntera(inputPermessoInizio);
   abilitaArrotondamentoOraIntera(inputPermessoFine);
 
-  const labelCodice = document.createElement('label');
-  labelCodice.className = 'campo-label tappa-codice-label';
-  labelCodice.append('Codice');
-  const selectCodice = document.createElement('select');
-  selectCodice.className = 'tappa-codice';
-  labelCodice.appendChild(selectCodice);
-  div.appendChild(labelCodice);
-
   const labelCantiere = document.createElement('label');
   labelCantiere.className = 'campo-label tappa-cantiere-label';
   labelCantiere.append('Cantiere');
-  const inputCantiere = document.createElement('input');
-  inputCantiere.type = 'text';
-  inputCantiere.className = 'tappa-cantiere';
-  const datalistId = `tappa-cantieri-${index}`;
-  inputCantiere.setAttribute('list', datalistId);
-  const datalist = document.createElement('datalist');
-  datalist.id = datalistId;
-  labelCantiere.appendChild(inputCantiere);
-  labelCantiere.appendChild(datalist);
+  const selectCantiere = document.createElement('select');
+  selectCantiere.className = 'tappa-cantiere';
+  labelCantiere.appendChild(selectCantiere);
   div.appendChild(labelCantiere);
+
+  const labelCodice = document.createElement('label');
+  labelCodice.className = 'campo-label tappa-codice-label';
+  labelCodice.append('Codice');
+  const inputCodice = document.createElement('input');
+  inputCodice.type = 'text';
+  inputCodice.className = 'tappa-codice';
+  inputCodice.readOnly = true;
+  labelCodice.appendChild(inputCodice);
+  div.appendChild(labelCodice);
 
   const labelNote = document.createElement('label');
   labelNote.className = 'campo-label';
@@ -1946,17 +1985,49 @@ function aggiungiTappaVuota() {
   popolaSelectClienti(selectCliente, true);
 
   selectCliente.addEventListener('change', () => {
+    inputCodice.value = '';
     if (selectCliente.value !== CLIENTE_PERMESSO) {
-      aggiornaCodiciTappa(selectCliente, selectCodice, datalist);
+      popolaSelectCantieri(selectCliente.value, selectCantiere);
+    } else {
+      selectCantiere.innerHTML = '';
     }
     aggiornaAvvisoMultiCliente();
     aggiornaOrariTappe();
   });
-  selectCodice.addEventListener('change', () => {
-    aggiornaCantieriTappa(selectCliente.value, selectCodice.value, datalist);
+  selectCantiere.addEventListener('change', () => {
+    const opt = selectCantiere.selectedOptions[0];
+    inputCodice.value = opt ? (opt.dataset.codice || '') : '';
   });
 
   el.listaTappe.appendChild(div);
+}
+
+function popolaTappaDaRiga(div, riga) {
+  const selectCliente = div.querySelector('.tappa-cliente');
+  const selectCantiere = div.querySelector('.tappa-cantiere');
+  const inputCodice = div.querySelector('.tappa-codice');
+  const inputNote = div.querySelector('.tappa-note');
+  const inputOrarioSwitch = div.querySelector('.tappa-orario-switch');
+  const inputPermessoInizio = div.querySelector('.tappa-permesso-inizio');
+  const inputPermessoFine = div.querySelector('.tappa-permesso-fine');
+
+  selectCliente.value = riga.cliente;
+  if (riga.cliente !== CLIENTE_PERMESSO) {
+    popolaSelectCantieri(riga.cliente, selectCantiere);
+    if (riga.cantiere && ![...selectCantiere.options].some(o => o.value === riga.cantiere)) {
+      const opt = document.createElement('option');
+      opt.value = riga.cantiere;
+      opt.textContent = `${riga.cantiere} (non più in anagrafica)`;
+      opt.dataset.codice = riga.codice || '';
+      selectCantiere.appendChild(opt);
+    }
+    selectCantiere.value = riga.cantiere || '';
+    inputCodice.value = riga.codice || '';
+  }
+  inputNote.value = riga.note || '';
+  inputOrarioSwitch.value = riga.orarioSwitch || '';
+  inputPermessoInizio.value = riga.orarioInizioPermesso || '';
+  inputPermessoFine.value = riga.orarioFinePermesso || '';
 }
 
 function raggruppaInBlocchi(righe) {
@@ -2131,14 +2202,19 @@ async function salvaFormGiorno(e) {
 
   const multiClienteNonRisolto = tipoGiorno === 'normale' && !percentualiRisolte;
 
-  await salvaGiornoAttivita({
+  const record = {
     dipendente,
     meseAnno,
     data,
     tipoGiorno,
     righe,
     multiClienteNonRisolto
-  });
+  };
+  if (stato.giornoInModifica) {
+    record.id = stato.giornoInModifica.id;
+  }
+
+  await salvaGiornoAttivita(record);
 
   chiudiGiornoForm();
   await aggiornaAttivita();
@@ -2172,7 +2248,7 @@ el.btnPrevMonthAttivita.addEventListener('click', () => cambiaMeseAttivita(-1));
 el.btnNextMonthAttivita.addEventListener('click', () => cambiaMeseAttivita(1));
 el.btnReopenMonthAttivita.addEventListener('click', riapriMeseAttivita);
 el.btnCloseMonthAttivita.addEventListener('click', chiudiMeseAttivita);
-el.btnAddGiorno.addEventListener('click', apriGiornoForm);
+el.btnAddGiorno.addEventListener('click', () => apriGiornoForm());
 el.btnApriAnagrafica.addEventListener('click', apriAnagrafica);
 el.btnImportaAttivita.addEventListener('click', () => el.inputImportaAttivita.click());
 el.inputImportaAttivita.addEventListener('change', async () => {

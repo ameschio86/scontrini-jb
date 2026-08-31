@@ -682,9 +682,20 @@ body {
   color: var(--primary-blue-dark);
 }
 
+.giorno-azioni-espanse {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.giorno-azioni-espanse .btn-secondary {
+  flex: 1;
+  width: auto;
+  margin: 0;
+}
+
 .btn-elimina-giorno {
-  display: block;
-  width: 100%;
+  flex: 1;
   background: var(--danger);
   color: white;
   border: none;
@@ -692,7 +703,6 @@ body {
   padding: 10px;
   border-radius: 10px;
   cursor: pointer;
-  margin-top: 4px;
 }
 
 .spesa-form {
@@ -755,6 +765,11 @@ body {
   font-family: inherit;
   color: var(--text-dark);
   background: var(--bg-white);
+}
+
+.campo-label input[readonly] {
+  background: var(--bg-light);
+  color: var(--text-muted);
 }
 
 .campo-fieldset {
