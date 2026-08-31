@@ -923,7 +923,7 @@ function chiudiFotocamera() {
   el.viewCamera.classList.add('hidden');
 }
 
-function comprimiImmagine(sourceCanvas) {
+function comprimiImmagineACanvas(sourceCanvas) {
   const { width, height } = sourceCanvas;
   const latoLungo = Math.max(width, height);
   const scala = latoLungo > MAX_LATO_LUNGO ? MAX_LATO_LUNGO / latoLungo : 1;
@@ -936,10 +936,33 @@ function comprimiImmagine(sourceCanvas) {
   const ctx = outCanvas.getContext('2d');
   ctx.filter = 'contrast(1.15) saturate(1.05)';
   ctx.drawImage(sourceCanvas, 0, 0, targetW, targetH);
+  return outCanvas;
+}
 
-  return new Promise((resolve) => {
-    outCanvas.toBlob(resolve, 'image/jpeg', JPEG_QUALITY);
-  });
+function canvasABlob(canvas) {
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', JPEG_QUALITY));
+}
+
+function comprimiImmagine(sourceCanvas) {
+  return canvasABlob(comprimiImmagineACanvas(sourceCanvas));
+}
+
+function ritagliaCanvas(sorgente, riquadro) {
+  const margineX = sorgente.width * 0.03;
+  const margineY = sorgente.height * 0.03;
+
+  const x0 = Math.max(0, Math.floor(riquadro.x0 - margineX));
+  const y0 = Math.max(0, Math.floor(riquadro.y0 - margineY));
+  const x1 = Math.min(sorgente.width, Math.ceil(riquadro.x1 + margineX));
+  const y1 = Math.min(sorgente.height, Math.ceil(riquadro.y1 + margineY));
+  const w = Math.max(1, x1 - x0);
+  const h = Math.max(1, y1 - y0);
+
+  const out = document.createElement('canvas');
+  out.width = w;
+  out.height = h;
+  out.getContext('2d').drawImage(sorgente, x0, y0, w, h, 0, 0, w, h);
+  return out;
 }
 
 function scattaFoto() {
@@ -952,22 +975,21 @@ function scattaFoto() {
 
   if (navigator.vibrate) navigator.vibrate(60);
 
-  if (stato.cameraContesto === 'spesa-ai') {
-    const scatto = document.createElement('canvas');
-    scatto.width = canvas.width;
-    scatto.height = canvas.height;
-    scatto.getContext('2d').drawImage(canvas, 0, 0);
-    chiudiFotocamera();
-    elaboraScontrinoAI(scatto);
-    return;
-  }
-
   const grezza = document.createElement('canvas');
   grezza.width = canvas.width;
   grezza.height = canvas.height;
   grezza.getContext('2d').drawImage(canvas, 0, 0);
-  stato.fotoGrezza = grezza;
 
+  if (stato.cameraContesto === 'spesa-ai') {
+    // Il ritaglio sfondo/scontrino per il rimborso lo tenta in automatico l'IA
+    // (dai blocchi di testo individuati dall'OCR): niente trascina-angoli manuale,
+    // a meno che l'IA non riesca a isolare un riquadro affidabile (vedi elaboraScontrinoAI).
+    chiudiFotocamera();
+    elaboraScontrinoAI(grezza);
+    return;
+  }
+
+  stato.fotoGrezza = grezza;
   chiudiFotocamera();
   apriRifinisci();
 }
@@ -1218,6 +1240,20 @@ async function confermaRifinisci() {
       Math.max(200, largOutput),
       Math.max(200, altOutput)
     );
+
+    if (stato.cameraContesto === 'spesa-ai') {
+      // A questo punto i dati sono già stati letti dall'IA (siamo qui solo perché
+      // non era riuscita a isolare da sola un riquadro affidabile): il ritaglio
+      // manuale serve solo per la foto, non va rifatta la lettura.
+      const blobRitagliato = await comprimiImmagine(warpCanvas);
+      impostaFotoSpesa(blobRitagliato);
+      await mostraFlash(el.rifinisciFlash);
+      chiudiRifinisci();
+      el.statoScattaRimborso.classList.remove('hidden');
+      el.statoScattaRimborso.textContent = '✅ Foto ritagliata. Controlla i dati prima di salvare.';
+      setTimeout(() => el.statoScattaRimborso.classList.add('hidden'), 5000);
+      return;
+    }
 
     const blob = await comprimiImmagine(warpCanvas);
     const dataScontrino = el.inputDataRifinisci.value || dataISOCorrente();
@@ -2130,15 +2166,29 @@ async function elaboraScontrinoAI(canvas) {
   el.statoScattaRimborso.textContent = 'Sto leggendo lo scontrino...';
 
   try {
-    const blob = await comprimiImmagine(canvas);
+    const canvasCompresso = comprimiImmagineACanvas(canvas);
+    const blob = await canvasABlob(canvasCompresso);
     const risultato = await richiediLetturaScontrino(blob);
 
     applicaDatiScontrinoAlForm(risultato);
     impostaCategoriaSpesa(risultato.categoria);
-    impostaFotoSpesa(blob);
 
-    el.statoScattaRimborso.textContent = '✅ Fatto! Controlla i dati e la categoria, poi scegli fattura/scontrino e la modalità di pagamento prima di salvare.';
-    setTimeout(() => el.statoScattaRimborso.classList.add('hidden'), 7000);
+    if (risultato.riquadro) {
+      // L'IA ha isolato il/i scontrino/i dallo sfondo (dai blocchi di testo letti
+      // dall'OCR): ritaglio automatico, nessun tocco richiesto.
+      const canvasRitagliato = ritagliaCanvas(canvasCompresso, risultato.riquadro);
+      const blobRitagliato = await canvasABlob(canvasRitagliato);
+      impostaFotoSpesa(blobRitagliato);
+      el.statoScattaRimborso.textContent = '✅ Fatto! Ho anche isolato lo scontrino dallo sfondo. Controlla i dati e la categoria, poi scegli fattura/scontrino e la modalità di pagamento prima di salvare.';
+      setTimeout(() => el.statoScattaRimborso.classList.add('hidden'), 7000);
+    } else {
+      // Non è stato possibile isolare un riquadro affidabile: i dati sono comunque
+      // letti, ma per la foto si passa al ritaglio manuale come rete di sicurezza.
+      impostaFotoSpesa(blob);
+      stato.fotoGrezza = canvas;
+      el.statoScattaRimborso.textContent = '⚠ Ho letto i dati, ma non sono riuscito a isolare lo scontrino dallo sfondo: ritaglialo tu prima di salvare.';
+      apriRifinisci();
+    }
   } catch (err) {
     el.statoScattaRimborso.textContent = `⚠ Non sono riuscito a leggere lo scontrino (${err.message}). Compila a mano.`;
   }
