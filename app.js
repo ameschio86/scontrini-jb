@@ -464,7 +464,8 @@ const stato = {
   anagraficaClienti: [],
   anagraficaCorrente: null,
   tappeCounter: 0,
-  giornoInModifica: null
+  giornoInModifica: null,
+  formSpesaOrigine: 'rimborso'
 };
 
 /* =========================================================
@@ -1116,6 +1117,8 @@ async function confermaRifinisci() {
     await mostraFlash(el.rifinisciFlash);
     chiudiRifinisci();
     await aggiornaDashboard();
+
+    await precompilaRimborsoDaFoto(blob);
   } finally {
     el.rifinisciLoading.classList.add('hidden');
   }
@@ -1927,53 +1930,77 @@ function abilitaDettaturaTappa(btnMic, statoTesto, div) {
    RIMBORSO — lettura scontrino con AI (foto → dati)
    ========================================================= */
 
+async function richiediLetturaScontrino(blob) {
+  const dataUrl = await blobToBase64(blob);
+  const immagineBase64 = dataUrl.split(',')[1];
+
+  const risposta = await fetch(AI_WORKER_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ modalita: 'scontrino', immagine: immagineBase64 })
+  });
+  if (!risposta.ok) throw new Error('il servizio non ha risposto correttamente');
+  const risultato = await risposta.json();
+  if (risultato.errore) throw new Error(risultato.errore);
+  return risultato;
+}
+
+function applicaDatiScontrinoAlForm(risultato) {
+  if (risultato.data) el.inputSpesaData.value = risultato.data;
+  if (risultato.esercente) el.inputSpesaEsercente.value = risultato.esercente;
+  if (risultato.luogo) el.inputSpesaLuogo.value = risultato.luogo;
+  if (risultato.descrizione) el.inputSpesaDescrizione.value = risultato.descrizione;
+  if (risultato.importo) el.inputSpesaImporto.value = risultato.importo;
+  const radioScontrino = document.querySelector('input[name="giustificativo"][value="scontrino"]');
+  if (radioScontrino) radioScontrino.checked = true;
+}
+
+async function archiviaScontrinoLetto(risultato, blob) {
+  const categoria = risultato.categoria === 'gasolio' ? 'gasolio' : 'generico';
+  const statoMeseScontrini = await getStatoMese(stato.meseAttivo);
+  if (statoMeseScontrini.chiuso) {
+    return `il mese ${etichettaMese(stato.meseAttivo)} degli Scontrini è chiuso, la foto non è stata archiviata`;
+  }
+  await salvaRicevuta({
+    categoria,
+    timestamp: new Date().toISOString(),
+    meseAnno: stato.meseAttivo,
+    dataScontrino: risultato.data || dataISOCorrente(),
+    immagine: blob
+  });
+  await aggiornaDashboard();
+  return `foto archiviata in Scontrini · ${categoria === 'gasolio' ? 'Gasolio' : 'Generico'}`;
+}
+
 async function elaboraScontrinoAI(canvas) {
   el.statoScattaRimborso.classList.remove('hidden');
   el.statoScattaRimborso.textContent = 'Sto leggendo lo scontrino...';
 
   try {
     const blob = await comprimiImmagine(canvas);
-    const dataUrl = await blobToBase64(blob);
-    const immagineBase64 = dataUrl.split(',')[1];
+    const risultato = await richiediLetturaScontrino(blob);
 
-    const risposta = await fetch(AI_WORKER_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ modalita: 'scontrino', immagine: immagineBase64 })
-    });
-    if (!risposta.ok) throw new Error('il servizio non ha risposto correttamente');
-    const risultato = await risposta.json();
-    if (risultato.errore) throw new Error(risultato.errore);
-
-    if (risultato.data) el.inputSpesaData.value = risultato.data;
-    if (risultato.esercente) el.inputSpesaEsercente.value = risultato.esercente;
-    if (risultato.luogo) el.inputSpesaLuogo.value = risultato.luogo;
-    if (risultato.descrizione) el.inputSpesaDescrizione.value = risultato.descrizione;
-    if (risultato.importo) el.inputSpesaImporto.value = risultato.importo;
-    const radioScontrino = document.querySelector('input[name="giustificativo"][value="scontrino"]');
-    if (radioScontrino) radioScontrino.checked = true;
-
-    const categoria = risultato.categoria === 'gasolio' ? 'gasolio' : 'generico';
-    const statoMeseScontrini = await getStatoMese(stato.meseAttivo);
-    let messaggioArchiviazione;
-    if (statoMeseScontrini.chiuso) {
-      messaggioArchiviazione = `il mese ${etichettaMese(stato.meseAttivo)} degli Scontrini è chiuso, la foto non è stata archiviata`;
-    } else {
-      await salvaRicevuta({
-        categoria,
-        timestamp: new Date().toISOString(),
-        meseAnno: stato.meseAttivo,
-        dataScontrino: risultato.data || dataISOCorrente(),
-        immagine: blob
-      });
-      await aggiornaDashboard();
-      messaggioArchiviazione = `foto archiviata in Scontrini · ${categoria === 'gasolio' ? 'Gasolio' : 'Generico'}`;
-    }
+    applicaDatiScontrinoAlForm(risultato);
+    const messaggioArchiviazione = await archiviaScontrinoLetto(risultato, blob);
 
     el.statoScattaRimborso.textContent = `✅ Fatto! ${messaggioArchiviazione}. Controlla i dati e scegli la modalità di pagamento prima di salvare.`;
     setTimeout(() => el.statoScattaRimborso.classList.add('hidden'), 7000);
   } catch (err) {
     el.statoScattaRimborso.textContent = `⚠ Non sono riuscito a leggere lo scontrino (${err.message}). Compila a mano.`;
+  }
+}
+
+async function precompilaRimborsoDaFoto(blob) {
+  try {
+    const risultato = await richiediLetturaScontrino(blob);
+    await apriFormSpesa('scontrini');
+    applicaDatiScontrinoAlForm(risultato);
+    el.statoScattaRimborso.classList.remove('hidden');
+    el.statoScattaRimborso.textContent = '✅ Rimborso precompilato dallo scontrino appena archiviato. Controlla i dati e scegli la modalità di pagamento (o annulla se questo scontrino non serve a rimborso).';
+    setTimeout(() => el.statoScattaRimborso.classList.add('hidden'), 9000);
+  } catch (err) {
+    // Silenzioso: lo scontrino è già stato archiviato correttamente in Scontrini,
+    // questo è solo un tentativo automatico in più — se fallisce si compila a mano come prima.
   }
 }
 
@@ -3233,17 +3260,23 @@ async function onEsercenteChange() {
   }
 }
 
-async function apriFormSpesa() {
+async function apriFormSpesa(origine = 'rimborso') {
+  stato.formSpesaOrigine = origine;
   el.formSpesa.reset();
   el.inputSpesaData.value = dataISOCorrente();
   await aggiornaListaEsercenti();
   el.viewRimborso.classList.add('hidden');
+  el.viewDashboard.classList.add('hidden');
   el.viewSpesaForm.classList.remove('hidden');
 }
 
 function chiudiFormSpesa() {
   el.viewSpesaForm.classList.add('hidden');
-  el.viewRimborso.classList.remove('hidden');
+  if (stato.formSpesaOrigine === 'scontrini') {
+    el.viewDashboard.classList.remove('hidden');
+  } else {
+    el.viewRimborso.classList.remove('hidden');
+  }
 }
 
 async function salvaFormSpesa(e) {
@@ -3290,7 +3323,7 @@ el.btnEliminaFirma.addEventListener('click', async () => {
   await eliminaFirma(dipendente);
   await aggiornaStatoFirma();
 });
-el.btnAddSpesa.addEventListener('click', apriFormSpesa);
+el.btnAddSpesa.addEventListener('click', () => apriFormSpesa('rimborso'));
 el.btnSpesaFormAnnulla.addEventListener('click', chiudiFormSpesa);
 el.btnScattaRimborso.addEventListener('click', () => apriFotocameraSpesaAI());
 el.inputSpesaEsercente.addEventListener('change', onEsercenteChange);
