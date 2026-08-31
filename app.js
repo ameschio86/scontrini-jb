@@ -1796,30 +1796,24 @@ function avviaCatturaVocaleContinua(btnMic, statoTesto, onTrascrizioneCompleta) 
     return;
   }
 
-  let riconoscimento = null;
   const testoBase = btnMic.textContent;
+  let riconoscimentoAttivo = null;
+  let inAscolto = false;
+  let trascrizioneAccumulata = '';
+  let erroreBloccante = false;
 
-  btnMic.addEventListener('click', () => {
-    if (riconoscimento) {
-      riconoscimento.stop();
-      return;
-    }
+  // La modalità "continua" nativa di alcuni telefoni Android è inaffidabile:
+  // può ripetere all'infinito le stesse parole. Invece la gestiamo noi:
+  // tanti segmenti brevi (una frase alla volta), riavviati in automatico
+  // uno dopo l'altro finché l'utente non tocca "Ferma registrazione".
+  function avviaSegmento() {
+    const r = new SpeechRecognitionCtor();
+    r.lang = 'it-IT';
+    r.continuous = false;
+    r.interimResults = true;
+    r.maxAlternatives = 1;
 
-    let trascrizioneFinale = '';
-    riconoscimento = new SpeechRecognitionCtor();
-    riconoscimento.lang = 'it-IT';
-    riconoscimento.continuous = true;
-    riconoscimento.interimResults = true;
-
-    btnMic.classList.add('mic-attivo');
-    btnMic.textContent = '⏹ Ferma registrazione';
-    statoTesto.classList.remove('hidden');
-    statoTesto.textContent = 'In ascolto... poi tocca "Ferma registrazione".';
-
-    riconoscimento.addEventListener('result', (e) => {
-      // Ricostruisce l'intera trascrizione da zero ad ogni evento (non concatena)
-      // per evitare che alcuni motori vocali (es. Android) riemettano più volte
-      // lo stesso risultato "finale", duplicando le parole.
+    r.addEventListener('result', (e) => {
       let finale = '';
       let interim = '';
       for (let i = 0; i < e.results.length; i++) {
@@ -1829,30 +1823,60 @@ function avviaCatturaVocaleContinua(btnMic, statoTesto, onTrascrizioneCompleta) 
           interim += e.results[i][0].transcript;
         }
       }
-      trascrizioneFinale = finale;
-      statoTesto.textContent = (finale + interim).trim() || 'In ascolto...';
+      if (finale) trascrizioneAccumulata += finale;
+      statoTesto.textContent = (trascrizioneAccumulata + interim).trim() || 'In ascolto...';
     });
 
-    riconoscimento.addEventListener('end', async () => {
-      btnMic.classList.remove('mic-attivo');
-      btnMic.textContent = testoBase;
-      riconoscimento = null;
-
-      const testo = trascrizioneFinale.trim();
-      if (!testo) {
-        statoTesto.classList.add('hidden');
-        return;
+    r.addEventListener('error', (e) => {
+      if (e.error !== 'no-speech' && e.error !== 'aborted') {
+        erroreBloccante = true;
       }
-      await onTrascrizioneCompleta(testo);
-    });
-    riconoscimento.addEventListener('error', () => {
-      btnMic.classList.remove('mic-attivo');
-      btnMic.textContent = testoBase;
-      statoTesto.classList.add('hidden');
-      riconoscimento = null;
     });
 
-    riconoscimento.start();
+    r.addEventListener('end', () => {
+      if (inAscolto && !erroreBloccante) {
+        avviaSegmento();
+      } else {
+        terminaAscolto();
+      }
+    });
+
+    riconoscimentoAttivo = r;
+    r.start();
+  }
+
+  async function terminaAscolto() {
+    inAscolto = false;
+    btnMic.classList.remove('mic-attivo');
+    btnMic.textContent = testoBase;
+    riconoscimentoAttivo = null;
+
+    const testo = trascrizioneAccumulata.trim();
+    if (!testo) {
+      statoTesto.classList.add('hidden');
+      return;
+    }
+    await onTrascrizioneCompleta(testo);
+  }
+
+  btnMic.addEventListener('click', () => {
+    if (inAscolto) {
+      inAscolto = false;
+      if (riconoscimentoAttivo) {
+        try { riconoscimentoAttivo.stop(); } catch (err) { /* ignora */ }
+      }
+      return;
+    }
+
+    inAscolto = true;
+    erroreBloccante = false;
+    trascrizioneAccumulata = '';
+    btnMic.classList.add('mic-attivo');
+    btnMic.textContent = '⏹ Ferma registrazione';
+    statoTesto.classList.remove('hidden');
+    statoTesto.textContent = 'In ascolto... poi tocca "Ferma registrazione".';
+
+    avviaSegmento();
   });
 }
 
