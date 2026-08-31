@@ -1953,8 +1953,25 @@ async function elaboraScontrinoAI(canvas) {
     const radioScontrino = document.querySelector('input[name="giustificativo"][value="scontrino"]');
     if (radioScontrino) radioScontrino.checked = true;
 
-    el.statoScattaRimborso.textContent = '✅ Fatto! Controlla i dati e scegli la modalità di pagamento prima di salvare.';
-    setTimeout(() => el.statoScattaRimborso.classList.add('hidden'), 6000);
+    const categoria = risultato.categoria === 'gasolio' ? 'gasolio' : 'generico';
+    const statoMeseScontrini = await getStatoMese(stato.meseAttivo);
+    let messaggioArchiviazione;
+    if (statoMeseScontrini.chiuso) {
+      messaggioArchiviazione = `il mese ${etichettaMese(stato.meseAttivo)} degli Scontrini è chiuso, la foto non è stata archiviata`;
+    } else {
+      await salvaRicevuta({
+        categoria,
+        timestamp: new Date().toISOString(),
+        meseAnno: stato.meseAttivo,
+        dataScontrino: risultato.data || dataISOCorrente(),
+        immagine: blob
+      });
+      await aggiornaDashboard();
+      messaggioArchiviazione = `foto archiviata in Scontrini · ${categoria === 'gasolio' ? 'Gasolio' : 'Generico'}`;
+    }
+
+    el.statoScattaRimborso.textContent = `✅ Fatto! ${messaggioArchiviazione}. Controlla i dati e scegli la modalità di pagamento prima di salvare.`;
+    setTimeout(() => el.statoScattaRimborso.classList.add('hidden'), 7000);
   } catch (err) {
     el.statoScattaRimborso.textContent = `⚠ Non sono riuscito a leggere lo scontrino (${err.message}). Compila a mano.`;
   }
