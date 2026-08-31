@@ -1672,6 +1672,23 @@ function formGiornoHaContenuto() {
   );
 }
 
+function applicaTappaAI(div, tappa) {
+  const ePermesso = tappa.cliente === 'PERMESSO';
+  const selectCliente = div.querySelector('.tappa-cliente');
+  selectCliente.value = ePermesso ? CLIENTE_PERMESSO : (tappa.cliente || '');
+  selectCliente.dispatchEvent(new Event('change'));
+  if (ePermesso) {
+    div.querySelector('.tappa-permesso-inizio').value = tappa.orario || '';
+    div.querySelector('.tappa-permesso-fine').value = tappa.orarioFinePermesso || '';
+  } else {
+    const selectCantiere = div.querySelector('.tappa-cantiere');
+    selectCantiere.value = tappa.cantiere || '';
+    selectCantiere.dispatchEvent(new Event('change'));
+    div.querySelector('.tappa-orario-switch').value = tappa.orario || '';
+  }
+  div.querySelector('.tappa-note').value = tappa.note || '';
+}
+
 function applicaRisultatoAI(risultato) {
   const tipiValidi = ['normale', 'ferie', 'malattia', 'infortunio', 'smart'];
   if (!tipiValidi.includes(risultato.tipoGiorno)) return false;
@@ -1697,21 +1714,7 @@ function applicaRisultatoAI(risultato) {
     stato.tappeCounter = 0;
     for (const tappa of (risultato.tappe || [])) {
       aggiungiTappaVuota();
-      const div = el.listaTappe.lastElementChild;
-      const ePermesso = tappa.cliente === 'PERMESSO';
-      const selectCliente = div.querySelector('.tappa-cliente');
-      selectCliente.value = ePermesso ? CLIENTE_PERMESSO : (tappa.cliente || '');
-      selectCliente.dispatchEvent(new Event('change'));
-      if (ePermesso) {
-        div.querySelector('.tappa-permesso-inizio').value = tappa.orario || '';
-        div.querySelector('.tappa-permesso-fine').value = tappa.orarioFinePermesso || '';
-      } else {
-        const selectCantiere = div.querySelector('.tappa-cantiere');
-        selectCantiere.value = tappa.cantiere || '';
-        selectCantiere.dispatchEvent(new Event('change'));
-        div.querySelector('.tappa-orario-switch').value = tappa.orario || '';
-      }
-      div.querySelector('.tappa-note').value = tappa.note || '';
+      applicaTappaAI(el.listaTappe.lastElementChild, tappa);
     }
     if (el.listaTappe.children.length === 0) aggiungiTappaVuota();
     aggiornaAvvisoMultiCliente();
@@ -1720,20 +1723,22 @@ function applicaRisultatoAI(risultato) {
   return true;
 }
 
+function costruisciClientiPerAI() {
+  return stato.anagraficaCorrente.clienti.map(c => ({
+    nome: c.nome,
+    cantieri: [...new Set(c.sottoclienti.flatMap(sc => sc.cantieri))]
+  }));
+}
+
 async function elaboraRaccontoGiornata(testo) {
   el.statoDettaturaGiornata.classList.remove('hidden');
   el.statoDettaturaGiornata.textContent = 'Sto elaborando quello che hai detto...';
 
   try {
-    const clienti = stato.anagraficaCorrente.clienti.map(c => ({
-      nome: c.nome,
-      cantieri: [...new Set(c.sottoclienti.flatMap(sc => sc.cantieri))]
-    }));
-
     const risposta = await fetch(AI_WORKER_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ testo, clienti })
+      body: JSON.stringify({ testo, clienti: costruisciClientiPerAI(), modalita: 'giornata' })
     });
     if (!risposta.ok) throw new Error('il servizio non ha risposto correttamente');
     const risultato = await risposta.json();
@@ -1757,7 +1762,34 @@ async function elaboraRaccontoGiornata(testo) {
   }
 }
 
-function abilitaDettaturaGiornata(btnMic, statoTesto) {
+async function elaboraRaccontoTappa(testo, div, statoTesto) {
+  statoTesto.classList.remove('hidden');
+  statoTesto.textContent = 'Sto elaborando quello che hai detto...';
+
+  try {
+    const risposta = await fetch(AI_WORKER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ testo, clienti: costruisciClientiPerAI(), modalita: 'tappa' })
+    });
+    if (!risposta.ok) throw new Error('il servizio non ha risposto correttamente');
+    const risultato = await risposta.json();
+    if (risultato.errore) throw new Error(risultato.errore);
+    const tappa = (risultato.tappe || [])[0];
+    if (!tappa) throw new Error('nessuna tappa riconosciuta');
+
+    applicaTappaAI(div, tappa);
+    aggiornaAvvisoMultiCliente();
+    aggiornaOrariTappe();
+
+    statoTesto.textContent = '✅ Fatto! Controlla i dati.';
+    setTimeout(() => statoTesto.classList.add('hidden'), 4000);
+  } catch (err) {
+    statoTesto.textContent = `⚠ Non sono riuscito a elaborare (${err.message}). Riprova o compila a mano.`;
+  }
+}
+
+function avviaCatturaVocaleContinua(btnMic, statoTesto, onTrascrizioneCompleta) {
   const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognitionCtor) {
     btnMic.classList.add('hidden');
@@ -1765,7 +1797,6 @@ function abilitaDettaturaGiornata(btnMic, statoTesto) {
   }
 
   let riconoscimento = null;
-  let trascrizioneFinale = '';
   const testoBase = btnMic.textContent;
 
   btnMic.addEventListener('click', () => {
@@ -1774,7 +1805,7 @@ function abilitaDettaturaGiornata(btnMic, statoTesto) {
       return;
     }
 
-    trascrizioneFinale = '';
+    let trascrizioneFinale = '';
     riconoscimento = new SpeechRecognitionCtor();
     riconoscimento.lang = 'it-IT';
     riconoscimento.continuous = true;
@@ -1783,18 +1814,23 @@ function abilitaDettaturaGiornata(btnMic, statoTesto) {
     btnMic.classList.add('mic-attivo');
     btnMic.textContent = '⏹ Ferma registrazione';
     statoTesto.classList.remove('hidden');
-    statoTesto.textContent = 'In ascolto... racconta la giornata, poi tocca "Ferma registrazione".';
+    statoTesto.textContent = 'In ascolto... poi tocca "Ferma registrazione".';
 
     riconoscimento.addEventListener('result', (e) => {
+      // Ricostruisce l'intera trascrizione da zero ad ogni evento (non concatena)
+      // per evitare che alcuni motori vocali (es. Android) riemettano più volte
+      // lo stesso risultato "finale", duplicando le parole.
+      let finale = '';
       let interim = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
+      for (let i = 0; i < e.results.length; i++) {
         if (e.results[i].isFinal) {
-          trascrizioneFinale += e.results[i][0].transcript + ' ';
+          finale += e.results[i][0].transcript + ' ';
         } else {
           interim += e.results[i][0].transcript;
         }
       }
-      statoTesto.textContent = (trascrizioneFinale + interim).trim() || 'In ascolto...';
+      trascrizioneFinale = finale;
+      statoTesto.textContent = (finale + interim).trim() || 'In ascolto...';
     });
 
     riconoscimento.addEventListener('end', async () => {
@@ -1807,7 +1843,7 @@ function abilitaDettaturaGiornata(btnMic, statoTesto) {
         statoTesto.classList.add('hidden');
         return;
       }
-      await elaboraRaccontoGiornata(testo);
+      await onTrascrizioneCompleta(testo);
     });
     riconoscimento.addEventListener('error', () => {
       btnMic.classList.remove('mic-attivo');
@@ -1818,6 +1854,14 @@ function abilitaDettaturaGiornata(btnMic, statoTesto) {
 
     riconoscimento.start();
   });
+}
+
+function abilitaDettaturaGiornata(btnMic, statoTesto) {
+  avviaCatturaVocaleContinua(btnMic, statoTesto, (testo) => elaboraRaccontoGiornata(testo));
+}
+
+function abilitaDettaturaTappa(btnMic, statoTesto, div) {
+  avviaCatturaVocaleContinua(btnMic, statoTesto, (testo) => elaboraRaccontoTappa(testo, div, statoTesto));
 }
 
 function recordGiornoValido(r) {
@@ -2071,6 +2115,16 @@ function aggiungiTappaVuota() {
   });
   titolo.appendChild(btnRimuovi);
   div.appendChild(titolo);
+
+  const btnMicTappa = document.createElement('button');
+  btnMicTappa.type = 'button';
+  btnMicTappa.className = 'btn-dettatura-giornata btn-dettatura-tappa';
+  btnMicTappa.textContent = '🎤 Racconta questa tappa a voce';
+  div.appendChild(btnMicTappa);
+  const statoDettaturaTappa = document.createElement('p');
+  statoDettaturaTappa.className = 'stato-dettatura hidden';
+  div.appendChild(statoDettaturaTappa);
+  abilitaDettaturaTappa(btnMicTappa, statoDettaturaTappa, div);
 
   const labelCliente = document.createElement('label');
   labelCliente.className = 'campo-label';
