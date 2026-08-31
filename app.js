@@ -523,6 +523,8 @@ const el = {
   avvisoMultiCliente: document.getElementById('avviso-multi-cliente'),
   titoloGiornoForm: document.getElementById('titolo-giorno-form'),
   btnSalvaGiorno: document.getElementById('btn-salva-giorno'),
+  btnMicGiornata: document.getElementById('btn-mic-giornata'),
+  statoDettaturaGiornata: document.getElementById('stato-dettatura-giornata'),
 
   btnEsportaBackup: document.getElementById('btn-esporta-backup'),
   btnImportaBackup: document.getElementById('btn-importa-backup'),
@@ -1652,6 +1654,172 @@ function abilitaDettatura(input, btnMic) {
   });
 }
 
+/* =========================================================
+   ATTIVITÀ — dettatura vocale intera giornata (AI)
+   ========================================================= */
+
+const AI_WORKER_URL = 'https://lb-gestionale-ai.arianuova.workers.dev';
+
+function formGiornoHaContenuto() {
+  const tappaConDati = [...el.listaTappe.children].some(div => div.querySelector('.tappa-cliente').value);
+  return Boolean(
+    tappaConDati ||
+    el.inputFerieLuogo.value ||
+    el.inputMalattiaNote.value ||
+    el.inputInfortunioNote.value ||
+    el.inputSmartNote.value ||
+    el.selectSmartCliente.value
+  );
+}
+
+function applicaRisultatoAI(risultato) {
+  const tipiValidi = ['normale', 'ferie', 'malattia', 'infortunio', 'smart'];
+  if (!tipiValidi.includes(risultato.tipoGiorno)) return false;
+
+  const radio = document.querySelector(`input[name="tipo-giorno"][value="${risultato.tipoGiorno}"]`);
+  radio.checked = true;
+  radio.dispatchEvent(new Event('change'));
+
+  if (risultato.tipoGiorno === 'ferie') {
+    el.inputFerieLuogo.value = risultato.note || '';
+  } else if (risultato.tipoGiorno === 'malattia') {
+    el.inputMalattiaNote.value = risultato.note || '';
+  } else if (risultato.tipoGiorno === 'infortunio') {
+    el.inputInfortunioNote.value = risultato.note || '';
+  } else if (risultato.tipoGiorno === 'smart') {
+    const tappa = (risultato.tappe || [])[0];
+    if (tappa) {
+      el.selectSmartCliente.value = tappa.cliente || '';
+      el.inputSmartNote.value = tappa.note || '';
+    }
+  } else {
+    el.listaTappe.innerHTML = '';
+    stato.tappeCounter = 0;
+    for (const tappa of (risultato.tappe || [])) {
+      aggiungiTappaVuota();
+      const div = el.listaTappe.lastElementChild;
+      const ePermesso = tappa.cliente === 'PERMESSO';
+      const selectCliente = div.querySelector('.tappa-cliente');
+      selectCliente.value = ePermesso ? CLIENTE_PERMESSO : (tappa.cliente || '');
+      selectCliente.dispatchEvent(new Event('change'));
+      if (ePermesso) {
+        div.querySelector('.tappa-permesso-inizio').value = tappa.orario || '';
+        div.querySelector('.tappa-permesso-fine').value = tappa.orarioFinePermesso || '';
+      } else {
+        const selectCantiere = div.querySelector('.tappa-cantiere');
+        selectCantiere.value = tappa.cantiere || '';
+        selectCantiere.dispatchEvent(new Event('change'));
+        div.querySelector('.tappa-orario-switch').value = tappa.orario || '';
+      }
+      div.querySelector('.tappa-note').value = tappa.note || '';
+    }
+    if (el.listaTappe.children.length === 0) aggiungiTappaVuota();
+    aggiornaAvvisoMultiCliente();
+    aggiornaOrariTappe();
+  }
+  return true;
+}
+
+async function elaboraRaccontoGiornata(testo) {
+  el.statoDettaturaGiornata.classList.remove('hidden');
+  el.statoDettaturaGiornata.textContent = 'Sto elaborando quello che hai detto...';
+
+  try {
+    const clienti = stato.anagraficaCorrente.clienti.map(c => ({
+      nome: c.nome,
+      cantieri: [...new Set(c.sottoclienti.flatMap(sc => sc.cantieri))]
+    }));
+
+    const risposta = await fetch(AI_WORKER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ testo, clienti })
+    });
+    if (!risposta.ok) throw new Error('il servizio non ha risposto correttamente');
+    const risultato = await risposta.json();
+    if (risultato.errore) throw new Error(risultato.errore);
+
+    if (formGiornoHaContenuto()) {
+      const procedi = await chiediConferma('Questo sostituirà i dati già inseriti nel modulo. Continuare?');
+      if (!procedi) {
+        el.statoDettaturaGiornata.classList.add('hidden');
+        return;
+      }
+    }
+
+    const applicato = applicaRisultatoAI(risultato);
+    if (!applicato) throw new Error('risposta non riconosciuta');
+
+    el.statoDettaturaGiornata.textContent = '✅ Fatto! Controlla i dati prima di salvare.';
+    setTimeout(() => el.statoDettaturaGiornata.classList.add('hidden'), 5000);
+  } catch (err) {
+    el.statoDettaturaGiornata.textContent = `⚠ Non sono riuscito a elaborare il racconto (${err.message}). Riprova o compila a mano.`;
+  }
+}
+
+function abilitaDettaturaGiornata(btnMic, statoTesto) {
+  const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognitionCtor) {
+    btnMic.classList.add('hidden');
+    return;
+  }
+
+  let riconoscimento = null;
+  let trascrizioneFinale = '';
+  const testoBase = btnMic.textContent;
+
+  btnMic.addEventListener('click', () => {
+    if (riconoscimento) {
+      riconoscimento.stop();
+      return;
+    }
+
+    trascrizioneFinale = '';
+    riconoscimento = new SpeechRecognitionCtor();
+    riconoscimento.lang = 'it-IT';
+    riconoscimento.continuous = true;
+    riconoscimento.interimResults = true;
+
+    btnMic.classList.add('mic-attivo');
+    btnMic.textContent = '⏹ Ferma registrazione';
+    statoTesto.classList.remove('hidden');
+    statoTesto.textContent = 'In ascolto... racconta la giornata, poi tocca "Ferma registrazione".';
+
+    riconoscimento.addEventListener('result', (e) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) {
+          trascrizioneFinale += e.results[i][0].transcript + ' ';
+        } else {
+          interim += e.results[i][0].transcript;
+        }
+      }
+      statoTesto.textContent = (trascrizioneFinale + interim).trim() || 'In ascolto...';
+    });
+
+    riconoscimento.addEventListener('end', async () => {
+      btnMic.classList.remove('mic-attivo');
+      btnMic.textContent = testoBase;
+      riconoscimento = null;
+
+      const testo = trascrizioneFinale.trim();
+      if (!testo) {
+        statoTesto.classList.add('hidden');
+        return;
+      }
+      await elaboraRaccontoGiornata(testo);
+    });
+    riconoscimento.addEventListener('error', () => {
+      btnMic.classList.remove('mic-attivo');
+      btnMic.textContent = testoBase;
+      statoTesto.classList.add('hidden');
+      riconoscimento = null;
+    });
+
+    riconoscimento.start();
+  });
+}
+
 function recordGiornoValido(r) {
   return r && typeof r === 'object' &&
     typeof r.dipendente === 'string' && r.dipendente &&
@@ -2283,6 +2451,7 @@ el.btnAggiungiTappa.addEventListener('click', () => {
 });
 el.formGiorno.addEventListener('submit', salvaFormGiorno);
 abilitaDettatura(el.inputSmartNote, el.btnMicSmartNote);
+abilitaDettaturaGiornata(el.btnMicGiornata, el.statoDettaturaGiornata);
 
 /* =========================================================
    RIMBORSO
