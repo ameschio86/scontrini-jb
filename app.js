@@ -2931,11 +2931,58 @@ async function aggiornaRimborso() {
   await aggiornaStatoFirma();
 }
 
+function formattaDataSicura(data) {
+  try {
+    const formattata = parseDataISO(data).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    if (formattata === 'Invalid Date') throw new Error('data non valida');
+    return formattata;
+  } catch (e) {
+    return data || '(data mancante)';
+  }
+}
+
 function renderListaSpese(spese, meseChiuso) {
   el.listaSpese.innerHTML = '';
   el.listaSpeseEmpty.classList.toggle('hidden', spese.length > 0);
 
+  // Ogni voce si renderizza isolata dalle altre: se una singola spesa ha un dato
+  // inatteso (es. una foto non valida) non deve far sparire dalla lista tutte
+  // quelle successive — mostra comunque una riga minima invece di saltarla.
   for (const s of spese) {
+    try {
+      el.listaSpese.appendChild(costruisciItemSpesa(s, meseChiuso));
+    } catch (err) {
+      console.error('Errore nel rendering di una spesa:', s, err);
+      el.listaSpese.appendChild(costruisciItemSpesaFallback(s));
+    }
+  }
+}
+
+function costruisciItemSpesaFallback(s) {
+  const item = document.createElement('div');
+  item.className = 'giorno-item';
+  const header = document.createElement('div');
+  header.className = 'giorno-item-header';
+  const info = document.createElement('div');
+  info.className = 'spesa-item-info';
+  const titolo = document.createElement('span');
+  titolo.className = 'spesa-item-titolo';
+  titolo.textContent = `⚠ ${formattaDataSicura(s.data)} · ${s.esercente || '(dati incompleti)'}`;
+  info.appendChild(titolo);
+  const dettaglio = document.createElement('span');
+  dettaglio.className = 'spesa-item-dettaglio';
+  dettaglio.textContent = 'Voce salvata ma non visualizzabile correttamente — contatta l\'assistenza, i dati NON sono persi.';
+  info.appendChild(dettaglio);
+  header.appendChild(info);
+  const importo = document.createElement('span');
+  importo.className = 'spesa-item-importo';
+  importo.textContent = formatoImporto(s.importo);
+  header.appendChild(importo);
+  item.appendChild(header);
+  return item;
+}
+
+function costruisciItemSpesa(s, meseChiuso) {
     const item = document.createElement('div');
     item.className = 'giorno-item';
 
@@ -2947,7 +2994,7 @@ function renderListaSpese(spese, meseChiuso) {
 
     const titolo = document.createElement('span');
     titolo.className = 'spesa-item-titolo';
-    titolo.textContent = `${parseDataISO(s.data).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })} · ${s.esercente || '(da completare)'}`;
+    titolo.textContent = `${formattaDataSicura(s.data)} · ${s.esercente || '(da completare)'}`;
     info.appendChild(titolo);
 
     const dettaglioParti = [s.luogo, s.descrizione, etichettaPagamento(s.pagamento)].filter(Boolean);
@@ -2969,11 +3016,17 @@ function renderListaSpese(spese, meseChiuso) {
     dettaglioEspanso.className = 'giorno-item-dettaglio-espanso hidden';
 
     if (s.immagine) {
-      const img = document.createElement('img');
-      img.className = 'spesa-foto-anteprima';
-      img.src = URL.createObjectURL(s.immagine);
-      img.loading = 'lazy';
-      dettaglioEspanso.appendChild(img);
+      try {
+        const img = document.createElement('img');
+        img.className = 'spesa-foto-anteprima';
+        img.src = URL.createObjectURL(s.immagine);
+        img.loading = 'lazy';
+        dettaglioEspanso.appendChild(img);
+      } catch (err) {
+        // La foto non è leggibile (dato inatteso), ma il resto della spesa
+        // (data, importo, dettagli) resta comunque visibile e modificabile.
+        console.error('Foto non leggibile per la spesa:', s, err);
+      }
     }
 
     const campiTesto = [
@@ -3018,12 +3071,11 @@ function renderListaSpese(spese, meseChiuso) {
       dettaglioEspanso.classList.toggle('hidden');
     });
 
-    el.listaSpese.appendChild(item);
-  }
+    return item;
 }
 
 async function eliminaSpesaConferma(spesa) {
-  const dataEtichetta = parseDataISO(spesa.data).toLocaleDateString('it-IT');
+  const dataEtichetta = formattaDataSicura(spesa.data);
   const conferma = await chiediConferma(`Eliminare la spesa "${spesa.esercente}" del ${dataEtichetta}?`);
   if (!conferma) return;
   await eliminaSpesa(spesa.id);
