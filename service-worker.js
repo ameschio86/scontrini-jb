@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'scontrini-jb-cache-v40';
+const CACHE_NAME = 'scontrini-jb-cache-v41';
 const ASSETS = [
   './',
   './index.html',
@@ -20,7 +20,11 @@ const ASSETS = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(ASSETS))
+      // { cache: 'reload' } forza il download da rete di ogni file, ignorando la
+      // cache HTTP del browser: senza questo, una versione nuova del service worker
+      // potrebbe comunque salvarsi dentro copie vecchie di app.js/index.html se il
+      // browser le aveva ancora "fresche" nella propria cache HTTP interna.
+      .then((cache) => cache.addAll(ASSETS.map((url) => new Request(url, { cache: 'reload' }))))
       .then(() => self.skipWaiting())
   );
 });

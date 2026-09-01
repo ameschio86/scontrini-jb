@@ -3963,8 +3963,28 @@ setTimeout(() => {
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('service-worker.js').catch(err => {
+    navigator.serviceWorker.register('service-worker.js').then((registrazione) => {
+      // Su Android l'app spesso "riprende" dallo sfondo senza un vero reload, quindi
+      // il browser non controlla mai da solo se c'è una versione più recente: lo
+      // forziamo noi ogni volta che l'app si apre o torna in primo piano.
+      registrazione.update().catch(() => {});
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          registrazione.update().catch(() => {});
+        }
+      });
+    }).catch(err => {
       console.warn('Registrazione service worker fallita:', err);
+    });
+
+    // Appena una versione più recente prende il controllo della pagina, ricarica
+    // in automatico: senza questo, la nuova versione resta scaricata e pronta ma
+    // invisibile finché non si chiude e riapre l'app manualmente.
+    let ricaricatoPerAggiornamento = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (ricaricatoPerAggiornamento) return;
+      ricaricatoPerAggiornamento = true;
+      window.location.reload();
     });
   });
 }
