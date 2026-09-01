@@ -576,7 +576,8 @@ const stato = {
   giornoInModifica: null,
   formSpesaOrigine: 'rimborso',
   spesaInModifica: null,
-  fotoSpesaCorrente: null
+  fotoSpesaCorrente: null,
+  esercentiConosciuti: []
 };
 
 /* =========================================================
@@ -2121,9 +2122,48 @@ async function richiediLetturaScontrino(blob) {
   return risultato;
 }
 
+function normalizzaEsercente(nome) {
+  return (nome || '')
+    .toUpperCase()
+    .normalize('NFD').replace(/\p{Mn}/gu, '')
+    .replace(/\b(SRL|SRLS|SPA|SNC|SAS|S\.R\.L\.?|S\.P\.A\.?|S\.N\.C\.?|S\.A\.S\.?|DI|&|C\.?)\b/g, ' ')
+    .replace(/[^A-Z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Gli scontrini dello stesso esercente arrivano scritti in mille modi diversi
+// (maiuscole/minuscole, ragione sociale completa, sigle societarie...): prima di
+// accettare il nome letto dall'IA, cerca tra gli esercenti già usati da questo
+// dipendente uno che corrisponda (per non riempire l'elenco di varianti dello
+// stesso posto) e, se lo trova, riusa quello già registrato.
+function trovaEsercenteEsistente(nomeGrezzo, esercentiEsistenti) {
+  const normalizzato = normalizzaEsercente(nomeGrezzo);
+  if (normalizzato.length < 3) return null;
+
+  let migliore = null;
+  let migliorLunghezza = Infinity;
+  for (const esistente of esercentiEsistenti) {
+    const normEsistente = normalizzaEsercente(esistente);
+    if (normEsistente.length < 3) continue;
+    if (normEsistente === normalizzato) return esistente;
+
+    const corto = normEsistente.length <= normalizzato.length ? normEsistente : normalizzato;
+    const lungo = normEsistente.length > normalizzato.length ? normEsistente : normalizzato;
+    if (corto.length >= 4 && lungo.includes(corto) && normEsistente.length < migliorLunghezza) {
+      migliore = esistente;
+      migliorLunghezza = normEsistente.length;
+    }
+  }
+  return migliore;
+}
+
 function applicaDatiScontrinoAlForm(risultato) {
   if (risultato.data) el.inputSpesaData.value = risultato.data;
-  if (risultato.esercente) el.inputSpesaEsercente.value = risultato.esercente;
+  if (risultato.esercente) {
+    const esistente = trovaEsercenteEsistente(risultato.esercente, stato.esercentiConosciuti || []);
+    el.inputSpesaEsercente.value = esistente || risultato.esercente;
+  }
   if (risultato.luogo) el.inputSpesaLuogo.value = risultato.luogo;
   if (risultato.descrizione) el.inputSpesaDescrizione.value = risultato.descrizione;
   if (risultato.importo) el.inputSpesaImporto.value = risultato.importo;
@@ -3488,6 +3528,7 @@ async function generaPdfPresenze(meseAnno) {
 async function aggiornaListaEsercenti() {
   const tutte = await getTutteLeSpese();
   const nomi = [...new Set(tutte.map(s => s.esercente).filter(Boolean))].sort();
+  stato.esercentiConosciuti = nomi;
   el.listaEsercenti.innerHTML = '';
   for (const nome of nomi) {
     const option = document.createElement('option');
