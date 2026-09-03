@@ -87,7 +87,7 @@
       <input type="file" id="input-importa-backup" accept="application/json" class="hidden">
     </div>
 
-    <span id="hub-versione" class="hub-versione">v1.11</span>
+    <span id="hub-versione" class="hub-versione">v1.12</span>
   </section>
 
   <!-- ===================== VISTA DATI FATTURAZIONE ===================== -->
@@ -377,6 +377,9 @@
         <label class="radio-label"><input type="radio" name="tipo-giorno" value="malattia"> Malattia</label>
         <label class="radio-label"><input type="radio" name="tipo-giorno" value="infortunio"> Infortunio</label>
         <label class="radio-label"><input type="radio" name="tipo-giorno" value="smart"> Smart working</label>
+        <label class="radio-label"><input type="radio" name="tipo-giorno" value="corso"> Corso (apprendistato)</label>
+        <label class="radio-label"><input type="radio" name="tipo-giorno" value="permesso_universita"> Permesso retribuito Università</label>
+        <label class="radio-label"><input type="radio" name="tipo-giorno" value="aspettativa"> Aspettativa non retribuita</label>
       </fieldset>
 
       <div id="blocco-ferie" class="campo-label hidden">
@@ -392,6 +395,21 @@
       <div id="blocco-infortunio" class="campo-label hidden">
         Note (opzionale)
         <input type="text" id="input-infortunio-note">
+      </div>
+
+      <div id="blocco-corso" class="campo-label hidden">
+        Note (opzionale)
+        <input type="text" id="input-corso-note" placeholder="es. nome del corso">
+      </div>
+
+      <div id="blocco-permesso-universita" class="campo-label hidden">
+        Note (opzionale)
+        <input type="text" id="input-permesso-universita-note">
+      </div>
+
+      <div id="blocco-aspettativa" class="campo-label hidden">
+        Note (opzionale)
+        <input type="text" id="input-aspettativa-note">
       </div>
 
       <div id="blocco-smart" class="hidden">

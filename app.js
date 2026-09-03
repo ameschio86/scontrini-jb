@@ -627,6 +627,12 @@ const el = {
   inputMalattiaNote: document.getElementById('input-malattia-note'),
   bloccoInfortunio: document.getElementById('blocco-infortunio'),
   inputInfortunioNote: document.getElementById('input-infortunio-note'),
+  bloccoCorso: document.getElementById('blocco-corso'),
+  inputCorsoNote: document.getElementById('input-corso-note'),
+  bloccoPermessoUniversita: document.getElementById('blocco-permesso-universita'),
+  inputPermessoUniversitaNote: document.getElementById('input-permesso-universita-note'),
+  bloccoAspettativa: document.getElementById('blocco-aspettativa'),
+  inputAspettativaNote: document.getElementById('input-aspettativa-note'),
   bloccoSmart: document.getElementById('blocco-smart'),
   selectSmartCliente: document.getElementById('select-smart-cliente'),
   inputSmartNote: document.getElementById('input-smart-note'),
@@ -766,6 +772,21 @@ function chiediConferma(messaggio) {
     el.confirmOk.addEventListener('click', onOk);
     el.confirmCancel.addEventListener('click', onCancel);
   });
+}
+
+// Un pulsante di export/PDF collegato direttamente a una funzione async, se questa
+// lancia un errore, fallisce in silenzio: l'utente clicca e non vede succedere
+// nulla, senza nessun indizio del perché. Ogni bottone che avvia un'azione async
+// va sempre collegato tramite questo, non con una arrow function diretta.
+function eseguiConGestioneErrori(azioneAsync, descrizioneAzione) {
+  return async (...args) => {
+    try {
+      await azioneAsync(...args);
+    } catch (err) {
+      console.error(`Errore durante "${descrizioneAzione}":`, err);
+      alert(`⚠ Si è verificato un problema durante "${descrizioneAzione}" (${err.message || err}). Riprova; se il problema persiste, segnala questo messaggio.`);
+    }
+  };
 }
 
 /* =========================================================
@@ -1463,8 +1484,8 @@ el.btnRifinisciConferma.addEventListener('click', confermaRifinisci);
 el.btnReopenMonth.addEventListener('click', riapriMese);
 el.btnCloseMonth.addEventListener('click', chiudiMese);
 
-el.btnExportGenerico.addEventListener('click', () => esportaPdf('generico', stato.meseAttivo));
-el.btnExportGasolio.addEventListener('click', () => esportaPdf('gasolio', stato.meseAttivo));
+el.btnExportGenerico.addEventListener('click', eseguiConGestioneErrori(() => esportaPdf('generico', stato.meseAttivo), 'Esporta ricevute rimborso'));
+el.btnExportGasolio.addEventListener('click', eseguiConGestioneErrori(() => esportaPdf('gasolio', stato.meseAttivo), 'Esporta ricevute gasolio'));
 
 el.linkArchive.addEventListener('click', (e) => { e.preventDefault(); apriArchivio(); });
 el.btnArchiveBack.addEventListener('click', chiudiArchivio);
@@ -1565,6 +1586,9 @@ function renderListaGiorniAttivita(giorni, meseChiuso) {
     const etichettaTipo = g.tipoGiorno === 'ferie' ? 'Ferie'
       : g.tipoGiorno === 'malattia' ? 'Malattia'
       : g.tipoGiorno === 'infortunio' ? 'Infortunio'
+      : g.tipoGiorno === 'corso' ? 'Corso'
+      : g.tipoGiorno === 'permesso_universita' ? 'Permesso Università'
+      : g.tipoGiorno === 'aspettativa' ? 'Aspettativa non retribuita'
       : g.tipoGiorno === 'smart' ? 'Smart working'
       : `${g.righe.length} ${g.righe.length === 1 ? 'tappa' : 'tappe'}`;
 
@@ -1905,7 +1929,7 @@ function applicaTappaAI(div, tappa) {
 }
 
 function applicaRisultatoAI(risultato) {
-  const tipiValidi = ['normale', 'ferie', 'malattia', 'infortunio', 'smart'];
+  const tipiValidi = ['normale', 'ferie', 'malattia', 'infortunio', 'corso', 'permesso_universita', 'aspettativa', 'smart'];
   if (!tipiValidi.includes(risultato.tipoGiorno)) return false;
 
   const radio = document.querySelector(`input[name="tipo-giorno"][value="${risultato.tipoGiorno}"]`);
@@ -1918,6 +1942,12 @@ function applicaRisultatoAI(risultato) {
     el.inputMalattiaNote.value = risultato.note || '';
   } else if (risultato.tipoGiorno === 'infortunio') {
     el.inputInfortunioNote.value = risultato.note || '';
+  } else if (risultato.tipoGiorno === 'corso') {
+    el.inputCorsoNote.value = risultato.note || '';
+  } else if (risultato.tipoGiorno === 'permesso_universita') {
+    el.inputPermessoUniversitaNote.value = risultato.note || '';
+  } else if (risultato.tipoGiorno === 'aspettativa') {
+    el.inputAspettativaNote.value = risultato.note || '';
   } else if (risultato.tipoGiorno === 'smart') {
     const tappa = (risultato.tappe || [])[0];
     if (tappa) {
@@ -2332,6 +2362,9 @@ async function apriGiornoForm(giornoEsistente = null) {
   el.bloccoFerie.classList.add('hidden');
   el.bloccoMalattia.classList.add('hidden');
   el.bloccoInfortunio.classList.add('hidden');
+  el.bloccoCorso.classList.add('hidden');
+  el.bloccoPermessoUniversita.classList.add('hidden');
+  el.bloccoAspettativa.classList.add('hidden');
   el.bloccoSmart.classList.add('hidden');
   el.bloccoNormale.classList.remove('hidden');
   el.avvisoMultiCliente.classList.add('hidden');
@@ -2364,6 +2397,12 @@ async function apriGiornoForm(giornoEsistente = null) {
       el.inputMalattiaNote.value = estraiNoteSemplice(primaRiga.note, 'MALATTIA');
     } else if (giornoEsistente.tipoGiorno === 'infortunio') {
       el.inputInfortunioNote.value = estraiNoteSemplice(primaRiga.note, 'INFORTUNIO');
+    } else if (giornoEsistente.tipoGiorno === 'corso') {
+      el.inputCorsoNote.value = estraiNoteSemplice(primaRiga.note, 'CORSO');
+    } else if (giornoEsistente.tipoGiorno === 'permesso_universita') {
+      el.inputPermessoUniversitaNote.value = estraiNoteSemplice(primaRiga.note, 'PERMESSO_UNIVERSITA');
+    } else if (giornoEsistente.tipoGiorno === 'aspettativa') {
+      el.inputAspettativaNote.value = estraiNoteSemplice(primaRiga.note, 'ASPETTATIVA');
     } else if (giornoEsistente.tipoGiorno === 'smart') {
       el.selectSmartCliente.value = primaRiga.cliente;
       el.inputSmartNote.value = primaRiga.note || '';
@@ -2749,6 +2788,15 @@ async function salvaFormGiorno(e) {
   } else if (tipoGiorno === 'infortunio') {
     const nota = el.inputInfortunioNote.value.trim();
     righe = [{ cliente: '', codice: '', cantiere: '', note: nota ? `INFORTUNIO - ${nota}` : 'INFORTUNIO', percentuale: null }];
+  } else if (tipoGiorno === 'corso') {
+    const nota = el.inputCorsoNote.value.trim();
+    righe = [{ cliente: '', codice: '', cantiere: '', note: nota ? `CORSO - ${nota}` : 'CORSO', percentuale: null }];
+  } else if (tipoGiorno === 'permesso_universita') {
+    const nota = el.inputPermessoUniversitaNote.value.trim();
+    righe = [{ cliente: '', codice: '', cantiere: '', note: nota ? `PERMESSO_UNIVERSITA - ${nota}` : 'PERMESSO_UNIVERSITA', percentuale: null }];
+  } else if (tipoGiorno === 'aspettativa') {
+    const nota = el.inputAspettativaNote.value.trim();
+    righe = [{ cliente: '', codice: '', cantiere: '', note: nota ? `ASPETTATIVA - ${nota}` : 'ASPETTATIVA', percentuale: null }];
   } else if (tipoGiorno === 'smart') {
     const cliente = el.selectSmartCliente.value;
     if (!cliente) {
@@ -2818,6 +2866,9 @@ document.querySelectorAll('input[name="tipo-giorno"]').forEach(radio => {
     el.bloccoFerie.classList.toggle('hidden', tipo !== 'ferie');
     el.bloccoMalattia.classList.toggle('hidden', tipo !== 'malattia');
     el.bloccoInfortunio.classList.toggle('hidden', tipo !== 'infortunio');
+    el.bloccoCorso.classList.toggle('hidden', tipo !== 'corso');
+    el.bloccoPermessoUniversita.classList.toggle('hidden', tipo !== 'permesso_universita');
+    el.bloccoAspettativa.classList.toggle('hidden', tipo !== 'aspettativa');
     el.bloccoSmart.classList.toggle('hidden', tipo !== 'smart');
     el.bloccoNormale.classList.toggle('hidden', tipo !== 'normale');
   });
@@ -2847,7 +2898,7 @@ el.inputImportaAttivita.addEventListener('change', async () => {
   if (file) await importaAttivitaDaFile(file);
   el.inputImportaAttivita.value = '';
 });
-el.btnExportAttivita.addEventListener('click', async () => {
+el.btnExportAttivita.addEventListener('click', eseguiConGestioneErrori(async () => {
   const dipendente = localStorage.getItem('dipendenteAttivo');
   const giorni = await getGiorniAttivitaDelMese(stato.meseAttivoAttivita, dipendente);
   const mancanti = trovaGiorniLavorativiMancanti(stato.meseAttivoAttivita, giorni);
@@ -2858,7 +2909,7 @@ el.btnExportAttivita.addEventListener('click', async () => {
   }
   await generaPdfAttivita(stato.meseAttivoAttivita);
   await generaPdfPresenze(stato.meseAttivoAttivita);
-});
+}, 'Esporta PDF Attività'));
 
 el.btnAnagraficaAnnulla.addEventListener('click', chiudiAnagrafica);
 el.btnAggiungiCliente.addEventListener('click', () => {
@@ -3730,9 +3781,9 @@ el.btnPrevMonthRimborso.addEventListener('click', () => cambiaMeseRimborso(-1));
 el.btnNextMonthRimborso.addEventListener('click', () => cambiaMeseRimborso(1));
 el.btnReopenMonthRimborso.addEventListener('click', riapriMeseRimborso);
 el.btnCloseMonthRimborso.addEventListener('click', chiudiMeseRimborso);
-el.btnExportRimborso.addEventListener('click', () => generaPdfRimborso(stato.meseAttivoRimborso));
-el.btnExportScontriniGenerico.addEventListener('click', () => esportaScontriniDaSpese('generico', stato.meseAttivoRimborso));
-el.btnExportScontriniGasolio.addEventListener('click', () => esportaScontriniDaSpese('gasolio', stato.meseAttivoRimborso));
+el.btnExportRimborso.addEventListener('click', eseguiConGestioneErrori(() => generaPdfRimborso(stato.meseAttivoRimborso), 'Esporta PDF Rimborso'));
+el.btnExportScontriniGenerico.addEventListener('click', eseguiConGestioneErrori(() => esportaScontriniDaSpese('generico', stato.meseAttivoRimborso), 'Esporta scontrini generico'));
+el.btnExportScontriniGasolio.addEventListener('click', eseguiConGestioneErrori(() => esportaScontriniDaSpese('gasolio', stato.meseAttivoRimborso), 'Esporta scontrini gasolio'));
 el.linkArchivioStorico.addEventListener('click', (e) => { e.preventDefault(); apriArchivioStorico(); });
 el.btnCaricaFirma.addEventListener('click', () => el.inputFirmaUpload.click());
 el.inputFirmaUpload.addEventListener('change', async () => {
