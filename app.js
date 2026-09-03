@@ -425,105 +425,6 @@ async function aggiornaStatoFirma() {
 }
 
 /* =========================================================
-   MIGRAZIONE SCONTRINI → RIMBORSO (fusione dei due moduli)
-   ========================================================= */
-
-async function calcolaPianoMigrazione() {
-  const [ricevute, spese] = await Promise.all([getTutteLeRicevute(), getTutteLeSpese()]);
-  const ricevuteDaMigrare = ricevute.filter(r => !r.migrata);
-  const speseScontrino = spese.filter(s => s.giustificativo === 'scontrino');
-
-  const ricevutePerData = new Map();
-  for (const r of ricevuteDaMigrare) {
-    const chiave = r.dataScontrino || r.timestamp.slice(0, 10);
-    if (!ricevutePerData.has(chiave)) ricevutePerData.set(chiave, []);
-    ricevutePerData.get(chiave).push(r);
-  }
-  const spesePerData = new Map();
-  for (const s of speseScontrino) {
-    if (!spesePerData.has(s.data)) spesePerData.set(s.data, []);
-    spesePerData.get(s.data).push(s);
-  }
-
-  const tutteLeDate = new Set([...ricevutePerData.keys(), ...spesePerData.keys()]);
-  const piano = { abbinamenti: [], nuoveSpese: [], senzaFoto: [], ambiguita: [] };
-
-  for (const data of tutteLeDate) {
-    const rList = ricevutePerData.get(data) || [];
-    const sList = spesePerData.get(data) || [];
-    if (rList.length === 1 && sList.length === 1) {
-      piano.abbinamenti.push({ ricevuta: rList[0], spesa: sList[0] });
-    } else if (rList.length === 1 && sList.length === 0) {
-      piano.nuoveSpese.push(rList[0]);
-    } else if (rList.length === 0 && sList.length === 1) {
-      piano.senzaFoto.push(sList[0]);
-    } else {
-      piano.ambiguita.push({ data, ricevute: rList, spese: sList });
-    }
-  }
-  return piano;
-}
-
-function formattaReportMigrazione(piano) {
-  const righe = [
-    `${piano.abbinamenti.length} abbinamenti automatici (foto + rimborso già esistente, stesso giorno)`,
-    `${piano.nuoveSpese.length} scontrini senza rimborso corrispondente (verranno creati come nuove spese "da completare")`,
-    `${piano.senzaFoto.length} spese-scontrino senza foto collegata (restano invariate)`,
-    `${piano.ambiguita.length} date ambigue da rivedere a mano (nessuna azione automatica)`
-  ];
-  let testo = righe.map(r => '• ' + r).join('\n');
-  if (piano.ambiguita.length > 0) {
-    const elenco = piano.ambiguita
-      .map(a => `${a.data} (${a.ricevute.length} foto / ${a.spese.length} spese)`)
-      .join(', ');
-    testo += `\n\nDate ambigue: ${elenco}`;
-  }
-  return testo;
-}
-
-async function eseguiMigrazioneScontriniRimborso() {
-  const piano = await calcolaPianoMigrazione();
-
-  if (piano.abbinamenti.length === 0 && piano.nuoveSpese.length === 0 && piano.ambiguita.length === 0) {
-    alert(`Nessuna migrazione da fare: non ci sono scontrini da unire ai rimborsi.${piano.senzaFoto.length ? ` (${piano.senzaFoto.length} spese-scontrino restano senza foto collegata, come già oggi.)` : ''}`);
-    return;
-  }
-
-  const report = formattaReportMigrazione(piano);
-  const procedi = await chiediConferma(
-    `${report}\n\nProcedere con la migrazione? I vecchi scontrini restano comunque consultabili nell'Archivio storico: questa operazione non cancella nulla.`
-  );
-  if (!procedi) return;
-
-  for (const { ricevuta, spesa } of piano.abbinamenti) {
-    await aggiornaSpesa({ ...spesa, categoria: ricevuta.categoria, immagine: ricevuta.immagine });
-    await aggiornaRicevuta({ ...ricevuta, migrata: true });
-  }
-
-  for (const ricevuta of piano.nuoveSpese) {
-    const dataSpesa = ricevuta.dataScontrino || ricevuta.timestamp.slice(0, 10);
-    await salvaSpesa({
-      meseAnno: ricevuta.meseAnno,
-      data: dataSpesa,
-      esercente: '',
-      luogo: '',
-      descrizione: '',
-      giustificativo: 'scontrino',
-      pagamento: '',
-      importo: 0,
-      note: 'Da completare — migrato da Scontrini (nessun rimborso corrispondente trovato).',
-      categoria: ricevuta.categoria,
-      immagine: ricevuta.immagine,
-      provenienza: 'migrata',
-      creatoIl: new Date().toISOString()
-    });
-    await aggiornaRicevuta({ ...ricevuta, migrata: true });
-  }
-
-  alert(`Migrazione completata.\n\n${report}`);
-}
-
-/* =========================================================
    STATO APPLICAZIONE
    ========================================================= */
 
@@ -546,7 +447,8 @@ const stato = {
   formSpesaOrigine: 'rimborso',
   spesaInModifica: null,
   fotoSpesaCorrente: null,
-  esercentiConosciuti: []
+  esercentiConosciuti: [],
+  pinSaltatoQuestaSessione: new Set()
 };
 
 /* =========================================================
@@ -559,7 +461,6 @@ const el = {
   selectDipendente: document.getElementById('select-dipendente'),
   cardRimborso: document.getElementById('card-rimborso'),
   cardAttivita: document.getElementById('card-attivita'),
-  btnMigrazioneScontrini: document.getElementById('btn-migrazione-scontrini'),
 
   viewAttivita: document.getElementById('view-attivita'),
   btnTornaHubAttivita: document.getElementById('btn-torna-hub-attivita'),
@@ -686,7 +587,14 @@ const el = {
   confirmDialog: document.getElementById('confirm-dialog'),
   confirmMessage: document.getElementById('confirm-message'),
   confirmCancel: document.getElementById('confirm-cancel'),
-  confirmOk: document.getElementById('confirm-ok')
+  confirmOk: document.getElementById('confirm-ok'),
+
+  pinDialog: document.getElementById('pin-dialog'),
+  pinMessaggio: document.getElementById('pin-messaggio'),
+  inputPin: document.getElementById('input-pin'),
+  pinErrore: document.getElementById('pin-errore'),
+  pinSalta: document.getElementById('pin-salta'),
+  pinConferma: document.getElementById('pin-conferma')
 };
 
 /* =========================================================
@@ -2573,15 +2481,19 @@ abilitaDettaturaGiornata(el.btnMicGiornata, el.statoDettaturaGiornata);
    spinta al backend (stesso Worker Cloudflare già usato per l'IA) quando c'è
    rete; se manca la rete o qualcosa fallisce, non succede NULLA di visibile
    per chi usa l'app — resta "in_attesa" e riparte da sola al prossimo giro.
-   Nessuna schermata di login ancora: l'identità del dipendente su un dato
-   telefono viene stabilita in automatico con un PIN generato a caso e mai
-   mostrato, che il vero login (Fase 4) sostituirà quando arriverà.
+
+   Fase 4: il PIN si chiede solo nel momento in cui serve davvero un token per
+   parlare col database (mai per aprire o usare l'app in locale) — vedi
+   `ottieniTokenSync`/`chiediPinEAccedi` più sotto. Se la persona salta la
+   richiesta, l'app continua identica: i dati restano "in_attesa" in locale.
 
    Tutte le operazioni di sync passano da un'unica coda (accodaSync): mai più
    di una alla volta. Senza questo, un pull e un'eliminazione partiti quasi
    nello stesso momento potevano intrecciarsi in ordini imprevedibili e far
    "resuscitare" in locale una spesa appena eliminata — bug reale, trovato
-   testando a fondo prima del push, non solo teorico.
+   testando a fondo prima del push, non solo teorico. La stessa coda fa anche
+   sì che, se serve chiedere il PIN, compaia una sola richiesta alla volta:
+   tutte le altre operazioni in coda aspettano semplicemente il loro turno.
    ========================================================= */
 
 let codaSync = Promise.resolve();
@@ -2591,61 +2503,106 @@ function accodaSync(azione) {
   return prossima;
 }
 
+// Wrapper sottile su fetch per tutte le chiamate autenticate: se il server
+// risponde 401 il token in cache non è più valido (PIN resettato
+// dall'amministratore, o versione del token cambiata) — lo elimina subito,
+// così il prossimo tentativo di sync richiama ottieniTokenSync(), non trova
+// nulla in cache e richiede di nuovo il PIN invece di fallire in silenzio
+// per sempre con lo stesso token ormai morto.
+async function fetchProtetto(url, opzioni) {
+  const risposta = await fetch(url, opzioni);
+  if (risposta.status === 401) {
+    const dipendente = localStorage.getItem('dipendenteAttivo');
+    if (dipendente) localStorage.removeItem(`sync_token__${dipendente}`);
+  }
+  return risposta;
+}
+
 async function ottieniTokenSync() {
   const dipendente = localStorage.getItem('dipendenteAttivo');
   if (!dipendente) return null;
 
-  const chiavePin = `sync_pin__${dipendente}`;
   const chiaveToken = `sync_token__${dipendente}`;
-
   const tokenEsistente = localStorage.getItem(chiaveToken);
   if (tokenEsistente) return tokenEsistente;
 
-  let pin = localStorage.getItem(chiavePin);
-  if (!pin) {
-    pin = String(Math.floor(100000 + Math.random() * 900000));
-    let rispostaRegistra;
-    try {
-      rispostaRegistra = await fetch(`${AI_WORKER_URL}/registra-pin`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nome: dipendente, pin })
-      });
-    } catch (e) {
-      return null; // offline: niente sync per ora, riproverà più tardi
-    }
-    if (rispostaRegistra.ok) {
-      localStorage.setItem(chiavePin, pin);
-    } else {
-      // 409 = nome già registrato altrove (altro telefono, o già in Fase 4 col
-      // PIN vero): questo dispositivo resta silenziosamente senza sync finché
-      // non arriva un login esplicito. Qualsiasi altro errore: stesso esito.
-      return null;
-    }
-  }
+  // Se la persona ha già scelto "Salta" in questa sessione per questo
+  // dipendente, non richiedere di nuovo il PIN a ogni singolo salvataggio:
+  // si ripresenta alla prossima apertura dell'app, non ogni due minuti.
+  if (stato.pinSaltatoQuestaSessione.has(dipendente)) return null;
 
-  let rispostaLogin;
-  try {
-    rispostaLogin = await fetch(`${AI_WORKER_URL}/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nome: dipendente, pin })
-    });
-  } catch (e) {
+  const token = await chiediPinEAccedi(dipendente);
+  if (!token) {
+    stato.pinSaltatoQuestaSessione.add(dipendente);
     return null;
   }
-  if (!rispostaLogin.ok) return null;
 
-  const dati = await rispostaLogin.json();
-  localStorage.setItem(chiaveToken, dati.token);
-  return dati.token;
+  localStorage.setItem(chiaveToken, token);
+  return token;
+}
+
+// Mostra la richiesta di PIN (non un login a pagina intera: solo un overlay
+// come chiediConferma) e tenta l'accesso finché non riesce o la persona
+// sceglie di saltare. Ritorna il token valido, oppure null se saltato.
+function chiediPinEAccedi(dipendente) {
+  return new Promise((resolve) => {
+    el.pinMessaggio.textContent =
+      `Per salvare al sicuro sul database condiviso i dati di ${dipendente}, inserisci il PIN che ti è stato consegnato. ` +
+      `Puoi continuare a usare l'app anche senza: i tuoi dati restano comunque salvati su questo telefono.`;
+    el.inputPin.value = '';
+    el.pinErrore.classList.add('hidden');
+    el.pinConferma.disabled = false;
+    el.pinConferma.textContent = 'Conferma';
+    el.pinDialog.classList.remove('hidden');
+    el.inputPin.focus();
+
+    async function onConferma() {
+      const pin = el.inputPin.value.trim();
+      if (!/^\d{4,6}$/.test(pin)) {
+        el.pinErrore.textContent = 'Inserisci un PIN di 4-6 cifre.';
+        el.pinErrore.classList.remove('hidden');
+        return;
+      }
+      el.pinConferma.disabled = true;
+      el.pinConferma.textContent = 'Verifica…';
+      el.pinErrore.classList.add('hidden');
+      try {
+        const risposta = await fetch(`${AI_WORKER_URL}/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nome: dipendente, pin })
+        });
+        const corpo = await risposta.json().catch(() => ({}));
+        if (risposta.ok && corpo.token) {
+          pulisci();
+          resolve(corpo.token);
+          return;
+        }
+        el.pinErrore.textContent = corpo.errore || 'PIN non corretto.';
+        el.pinErrore.classList.remove('hidden');
+      } catch (e) {
+        el.pinErrore.textContent = 'Connessione assente: riprova più tardi.';
+        el.pinErrore.classList.remove('hidden');
+      }
+      el.pinConferma.disabled = false;
+      el.pinConferma.textContent = 'Conferma';
+    }
+    function onSalta() { pulisci(); resolve(null); }
+    function pulisci() {
+      el.pinDialog.classList.add('hidden');
+      el.pinConferma.removeEventListener('click', onConferma);
+      el.pinSalta.removeEventListener('click', onSalta);
+    }
+    el.pinConferma.addEventListener('click', onConferma);
+    el.pinSalta.addEventListener('click', onSalta);
+  });
 }
 
 async function segnalaErroreSync(tabella, recordId, errore) {
   try {
     const token = await ottieniTokenSync();
     if (!token) return;
-    await fetch(`${AI_WORKER_URL}/sync-errore`, {
+    await fetchProtetto(`${AI_WORKER_URL}/sync-errore`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify({ tabella, recordId, errore: String(errore).slice(0, 500) })
@@ -2672,7 +2629,7 @@ async function sincronizzaSpesaInterno(spesa) {
 
     const immagineBase64 = spesa.immagine ? (await blobToBase64(spesa.immagine)).split(',')[1] : null;
 
-    const risposta = await fetch(`${AI_WORKER_URL}/spese`, {
+    const risposta = await fetchProtetto(`${AI_WORKER_URL}/spese`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify({
@@ -2775,7 +2732,7 @@ async function eliminaSpesaSulServerInterno(syncId) {
   try {
     const token = await ottieniTokenSync();
     if (!token) return; // resta in sospeso: ritenterà al prossimo giro online
-    const risposta = await fetch(`${AI_WORKER_URL}/spese/${syncId}`, {
+    const risposta = await fetchProtetto(`${AI_WORKER_URL}/spese/${syncId}`, {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${token}` }
     });
@@ -2826,7 +2783,7 @@ async function scaricaSpeseDalServerInterno(meseAnno) {
     const token = await ottieniTokenSync();
     if (!token) return;
 
-    const risposta = await fetch(`${AI_WORKER_URL}/spese?meseAnno=${encodeURIComponent(meseAnno)}`, {
+    const risposta = await fetchProtetto(`${AI_WORKER_URL}/spese?meseAnno=${encodeURIComponent(meseAnno)}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     if (!risposta.ok) return;
@@ -2909,7 +2866,7 @@ async function sincronizzaRecordInterno(config, record) {
       corpo[`${config.campoImmagine}Base64`] = blob ? (await blobToBase64(blob)).split(',')[1] : null;
     }
 
-    const risposta = await fetch(`${AI_WORKER_URL}/${config.percorso}`, {
+    const risposta = await fetchProtetto(`${AI_WORKER_URL}/${config.percorso}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify(corpo)
@@ -2941,7 +2898,7 @@ async function eliminaRecordSulServerInterno(config, syncId) {
   try {
     const token = await ottieniTokenSync();
     if (!token) return;
-    const risposta = await fetch(`${AI_WORKER_URL}/${config.percorso}/${syncId}`, {
+    const risposta = await fetchProtetto(`${AI_WORKER_URL}/${config.percorso}/${syncId}`, {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${token}` }
     });
@@ -2961,7 +2918,7 @@ async function scaricaRisorsaDalServerInterno(config, meseAnno) {
   try {
     const token = await ottieniTokenSync();
     if (!token) return;
-    const risposta = await fetch(`${AI_WORKER_URL}/${config.percorso}?meseAnno=${encodeURIComponent(meseAnno)}`, {
+    const risposta = await fetchProtetto(`${AI_WORKER_URL}/${config.percorso}?meseAnno=${encodeURIComponent(meseAnno)}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     if (!risposta.ok) return;
@@ -3042,7 +2999,7 @@ function sincronizzaFirma(dipendente, blob) {
       const token = await ottieniTokenSync();
       if (!token) return;
       const immagineBase64 = (await blobToBase64(blob)).split(',')[1];
-      await fetch(`${AI_WORKER_URL}/firme`, {
+      await fetchProtetto(`${AI_WORKER_URL}/firme`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ immagineBase64 })
@@ -3060,7 +3017,7 @@ function scaricaFirmaSeMancante(dipendente) {
       if (locale) return;
       const token = await ottieniTokenSync();
       if (!token) return;
-      const risposta = await fetch(`${AI_WORKER_URL}/firme`, { headers: { 'Authorization': `Bearer ${token}` } });
+      const risposta = await fetchProtetto(`${AI_WORKER_URL}/firme`, { headers: { 'Authorization': `Bearer ${token}` } });
       if (!risposta.ok) return;
       const { profilo } = await risposta.json();
       if (!profilo || !profilo.immagine) return;
@@ -3076,7 +3033,7 @@ function sincronizzaAnagraficaAttivita(record) {
     try {
       const token = await ottieniTokenSync();
       if (!token) return;
-      await fetch(`${AI_WORKER_URL}/anagrafica-attivita`, {
+      await fetchProtetto(`${AI_WORKER_URL}/anagrafica-attivita`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({
@@ -3100,7 +3057,7 @@ function scaricaAnagraficaSeMancante(dipendente) {
       if (locale) return;
       const token = await ottieniTokenSync();
       if (!token) return;
-      const risposta = await fetch(`${AI_WORKER_URL}/anagrafica-attivita`, { headers: { 'Authorization': `Bearer ${token}` } });
+      const risposta = await fetchProtetto(`${AI_WORKER_URL}/anagrafica-attivita`, { headers: { 'Authorization': `Bearer ${token}` } });
       if (!risposta.ok) return;
       const { profilo } = await risposta.json();
       if (!profilo) return;
@@ -3130,7 +3087,7 @@ function sincronizzaStatoMese(modulo, meseAnno, chiuso) {
     try {
       const token = await ottieniTokenSync();
       if (!token) return;
-      await fetch(`${AI_WORKER_URL}/stato-mese/${modulo}`, {
+      await fetchProtetto(`${AI_WORKER_URL}/stato-mese/${modulo}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ meseAnno, chiuso })
@@ -3146,7 +3103,7 @@ function scaricaStatoMeseSeDiverso(modulo, meseAnno, chiusoLocale, setLocale, on
     try {
       const token = await ottieniTokenSync();
       if (!token) return;
-      const risposta = await fetch(`${AI_WORKER_URL}/stato-mese/${modulo}?meseAnno=${encodeURIComponent(meseAnno)}`, {
+      const risposta = await fetchProtetto(`${AI_WORKER_URL}/stato-mese/${modulo}?meseAnno=${encodeURIComponent(meseAnno)}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (!risposta.ok) return;
@@ -4228,7 +4185,6 @@ async function ripristinaDaTesto(testo) {
   stato.meseAttivoAttivita = await determinaMeseAttivoAttivitaIniziale(localStorage.getItem('dipendenteAttivo'));
 }
 
-el.btnMigrazioneScontrini.addEventListener('click', eseguiMigrazioneScontriniRimborso);
 el.btnEsportaBackup.addEventListener('click', esportaBackupCompleto);
 el.btnImportaBackup.addEventListener('click', () => el.inputImportaBackup.click());
 el.inputImportaBackup.addEventListener('change', async () => {

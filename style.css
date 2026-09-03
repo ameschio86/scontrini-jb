@@ -1380,6 +1380,24 @@ body {
   flex: 1;
 }
 
+.pin-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 1.4rem;
+  letter-spacing: 0.3em;
+  text-align: center;
+  padding: 10px;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  margin-bottom: 10px;
+}
+
+.pin-errore {
+  color: var(--danger);
+  font-size: 0.85rem;
+  margin: -4px 0 12px;
+}
+
 /* ---------- Responsive (tablet / wide screens) ---------- */
 @media (min-width: 700px) {
   .capture-buttons {

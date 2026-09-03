@@ -83,11 +83,10 @@
       <button id="btn-esporta-backup" class="btn-backup-mini">💾 Backup</button>
       <button id="btn-importa-backup" class="btn-backup-mini">📂 Ripristina</button>
       <button id="btn-dati-fatturazione" class="btn-backup-mini">🧾 Dati fatturazione</button>
-      <button id="btn-migrazione-scontrini" class="btn-backup-mini">🔄 Unisci Scontrini e Rimborso</button>
       <input type="file" id="input-importa-backup" accept="application/json" class="hidden">
     </div>
 
-    <span id="hub-versione" class="hub-versione">v1.14</span>
+    <span id="hub-versione" class="hub-versione">v2.0</span>
   </section>
 
   <!-- ===================== VISTA DATI FATTURAZIONE ===================== -->
@@ -419,6 +418,19 @@
     <div class="confirm-buttons">
       <button id="confirm-cancel" class="btn-secondary">Annulla</button>
       <button id="confirm-ok" class="btn-primary">Conferma</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== RICHIESTA PIN (solo quando serve sincronizzare) ===================== -->
+<div id="pin-dialog" class="confirm-dialog hidden">
+  <div class="confirm-box">
+    <p id="pin-messaggio"></p>
+    <input type="tel" inputmode="numeric" pattern="[0-9]*" maxlength="6" id="input-pin" class="pin-input" autocomplete="off" placeholder="PIN">
+    <p id="pin-errore" class="pin-errore hidden"></p>
+    <div class="confirm-buttons">
+      <button id="pin-salta" class="btn-secondary">Salta per ora</button>
+      <button id="pin-conferma" class="btn-primary">Conferma</button>
     </div>
   </div>
 </div>
