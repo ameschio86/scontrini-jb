@@ -2518,13 +2518,21 @@ async function fetchProtetto(url, opzioni) {
   return risposta;
 }
 
-async function ottieniTokenSync() {
+// `interattivo`: solo le push che partono DIRETTAMENTE da un'azione della
+// persona (salva/elimina/chiudi mese) possono mostrare la richiesta di PIN.
+// Tutto il resto — avvio app, riconnessione, cambio scheda, apertura di una
+// schermata (pull), sweep periodici — passa `false` e resta silenzioso come
+// sempre: altrimenti il PIN comparirebbe anche solo aprendo l'app, che è
+// esattamente quello che l'utente ha chiesto di evitare.
+async function ottieniTokenSync(interattivo = true) {
   const dipendente = localStorage.getItem('dipendenteAttivo');
   if (!dipendente) return null;
 
   const chiaveToken = `sync_token__${dipendente}`;
   const tokenEsistente = localStorage.getItem(chiaveToken);
   if (tokenEsistente) return tokenEsistente;
+
+  if (!interattivo) return null;
 
   // Se la persona ha già scelto "Salta" in questa sessione per questo
   // dipendente, non richiedere di nuovo il PIN a ogni singolo salvataggio:
@@ -2600,7 +2608,7 @@ function chiediPinEAccedi(dipendente) {
 
 async function segnalaErroreSync(tabella, recordId, errore) {
   try {
-    const token = await ottieniTokenSync();
+    const token = await ottieniTokenSync(false); // solo un log interno, mai interattivo
     if (!token) return;
     await fetchProtetto(`${AI_WORKER_URL}/sync-errore`, {
       method: 'POST',
@@ -2612,11 +2620,11 @@ async function segnalaErroreSync(tabella, recordId, errore) {
   }
 }
 
-function sincronizzaSpesa(spesa) {
-  return accodaSync(() => sincronizzaSpesaInterno(spesa));
+function sincronizzaSpesa(spesa, interattivo = true) {
+  return accodaSync(() => sincronizzaSpesaInterno(spesa, interattivo));
 }
 
-async function sincronizzaSpesaInterno(spesa) {
+async function sincronizzaSpesaInterno(spesa, interattivo = true) {
   if (!spesa.syncId) return;
   // Se questa spesa è stata eliminata mentre la sua sincronizzazione era ancora
   // in coda (es. dietro un pull lento), non va rimandata in vita: bug reale,
@@ -2624,7 +2632,7 @@ async function sincronizzaSpesaInterno(spesa) {
   // server (e quindi in locale) una spesa che l'utente ha già cancellato.
   if (elencoEliminazioniPendenti().includes(spesa.syncId)) return;
   try {
-    const token = await ottieniTokenSync();
+    const token = await ottieniTokenSync(interattivo);
     if (!token) return;
 
     const immagineBase64 = spesa.immagine ? (await blobToBase64(spesa.immagine)).split(',')[1] : null;
@@ -2722,15 +2730,15 @@ function rimuoviEliminazionePendente(syncId) {
   }
 }
 
-function eliminaSpesaSulServer(syncId) {
+function eliminaSpesaSulServer(syncId, interattivo = true) {
   if (!syncId) return;
   aggiungiEliminazionePendente(syncId); // subito e sincrono, prima di accodare
-  return accodaSync(() => eliminaSpesaSulServerInterno(syncId));
+  return accodaSync(() => eliminaSpesaSulServerInterno(syncId, interattivo));
 }
 
-async function eliminaSpesaSulServerInterno(syncId) {
+async function eliminaSpesaSulServerInterno(syncId, interattivo = true) {
   try {
-    const token = await ottieniTokenSync();
+    const token = await ottieniTokenSync(interattivo);
     if (!token) return; // resta in sospeso: ritenterà al prossimo giro online
     const risposta = await fetchProtetto(`${AI_WORKER_URL}/spese/${syncId}`, {
       method: 'DELETE',
@@ -2749,10 +2757,10 @@ async function sincronizzaEliminazioniPendenti() {
   for (const syncId of elencoEliminazioniPendenti()) {
     const percorso = mappa[syncId] || 'spese';
     if (percorso === 'spese') {
-      await eliminaSpesaSulServer(syncId);
+      await eliminaSpesaSulServer(syncId, false); // sweep passivo: mai il PIN qui
     } else {
       const config = RISORSE_MOTORE_A.find(c => c.percorso === percorso);
-      if (config) await eliminaRecordSulServer(config, syncId);
+      if (config) await eliminaRecordSulServer(config, syncId, false);
     }
   }
 }
@@ -2770,7 +2778,7 @@ async function sincronizzaSpesePendenti() {
       spesa.syncId = crypto.randomUUID();
       await aggiornaSpesa(spesa);
     }
-    await sincronizzaSpesa(spesa);
+    await sincronizzaSpesa(spesa, false); // sweep passivo (avvio/online/visibilitychange): mai il PIN qui
   }
 }
 
@@ -2780,7 +2788,7 @@ function scaricaSpeseDalServer(meseAnno) {
 
 async function scaricaSpeseDalServerInterno(meseAnno) {
   try {
-    const token = await ottieniTokenSync();
+    const token = await ottieniTokenSync(false); // pull automatico all'apertura schermata: mai il PIN qui
     if (!token) return;
 
     const risposta = await fetchProtetto(`${AI_WORKER_URL}/spese?meseAnno=${encodeURIComponent(meseAnno)}`, {
@@ -2851,11 +2859,11 @@ const RISORSA_ATTIVITA_GIORNI = {
 
 const RISORSE_MOTORE_A = [RISORSA_ATTIVITA_GIORNI];
 
-async function sincronizzaRecordInterno(config, record) {
+async function sincronizzaRecordInterno(config, record, interattivo = true) {
   if (!record.syncId) return;
   if (elencoEliminazioniPendenti().includes(record.syncId)) return;
   try {
-    const token = await ottieniTokenSync();
+    const token = await ottieniTokenSync(interattivo);
     if (!token) return;
 
     const corpo = { id: record.syncId };
@@ -2890,13 +2898,13 @@ async function sincronizzaRecordInterno(config, record) {
   }
 }
 
-function sincronizzaRecord(config, record) {
-  return accodaSync(() => sincronizzaRecordInterno(config, record));
+function sincronizzaRecord(config, record, interattivo = true) {
+  return accodaSync(() => sincronizzaRecordInterno(config, record, interattivo));
 }
 
-async function eliminaRecordSulServerInterno(config, syncId) {
+async function eliminaRecordSulServerInterno(config, syncId, interattivo = true) {
   try {
-    const token = await ottieniTokenSync();
+    const token = await ottieniTokenSync(interattivo);
     if (!token) return;
     const risposta = await fetchProtetto(`${AI_WORKER_URL}/${config.percorso}/${syncId}`, {
       method: 'DELETE',
@@ -2908,15 +2916,15 @@ async function eliminaRecordSulServerInterno(config, syncId) {
   }
 }
 
-function eliminaRecordSulServer(config, syncId) {
+function eliminaRecordSulServer(config, syncId, interattivo = true) {
   if (!syncId) return;
   aggiungiEliminazionePendente(syncId, config.percorso);
-  return accodaSync(() => eliminaRecordSulServerInterno(config, syncId));
+  return accodaSync(() => eliminaRecordSulServerInterno(config, syncId, interattivo));
 }
 
 async function scaricaRisorsaDalServerInterno(config, meseAnno) {
   try {
-    const token = await ottieniTokenSync();
+    const token = await ottieniTokenSync(false); // pull automatico all'apertura schermata: mai il PIN qui
     if (!token) return;
     const risposta = await fetchProtetto(`${AI_WORKER_URL}/${config.percorso}?meseAnno=${encodeURIComponent(meseAnno)}`, {
       headers: { 'Authorization': `Bearer ${token}` }
@@ -2970,7 +2978,7 @@ async function sincronizzaRisorsaPendenti(config) {
       record.syncId = crypto.randomUUID();
       await config.aggiornaLocale(record);
     }
-    await sincronizzaRecord(config, record);
+    await sincronizzaRecord(config, record, false); // sweep passivo: mai il PIN qui
   }
 }
 
@@ -3015,7 +3023,7 @@ function scaricaFirmaSeMancante(dipendente) {
     try {
       const locale = await getFirma(dipendente);
       if (locale) return;
-      const token = await ottieniTokenSync();
+      const token = await ottieniTokenSync(false); // pull automatico: mai il PIN qui
       if (!token) return;
       const risposta = await fetchProtetto(`${AI_WORKER_URL}/firme`, { headers: { 'Authorization': `Bearer ${token}` } });
       if (!risposta.ok) return;
@@ -3055,7 +3063,7 @@ function scaricaAnagraficaSeMancante(dipendente) {
       const { store } = await txStore(STORE_ANAGRAFICA_ATTIVITA, 'readonly');
       const locale = await reqAsPromise(store.get(dipendente));
       if (locale) return;
-      const token = await ottieniTokenSync();
+      const token = await ottieniTokenSync(false); // pull automatico: mai il PIN qui
       if (!token) return;
       const risposta = await fetchProtetto(`${AI_WORKER_URL}/anagrafica-attivita`, { headers: { 'Authorization': `Bearer ${token}` } });
       if (!risposta.ok) return;
@@ -3101,7 +3109,7 @@ function sincronizzaStatoMese(modulo, meseAnno, chiuso) {
 function scaricaStatoMeseSeDiverso(modulo, meseAnno, chiusoLocale, setLocale, onCambiato) {
   return accodaSync(async () => {
     try {
-      const token = await ottieniTokenSync();
+      const token = await ottieniTokenSync(false); // pull automatico: mai il PIN qui
       if (!token) return;
       const risposta = await fetchProtetto(`${AI_WORKER_URL}/stato-mese/${modulo}?meseAnno=${encodeURIComponent(meseAnno)}`, {
         headers: { 'Authorization': `Bearer ${token}` }
