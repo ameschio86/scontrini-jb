@@ -1345,17 +1345,35 @@ async function esportaFotoBooklet(immagini, nomeFile, messaggioVuoto) {
     return;
   }
 
+  // Una singola foto non leggibile (es. un dato corrotto rimasto da un vecchio
+  // bug di backup/ripristino) non deve bloccare l'esportazione delle altre: le
+  // proviamo a caricare tutte prima, saltando solo quelle che falliscono.
+  const paginePronte = [];
+  let scartate = 0;
+  for (const immagine of immagini) {
+    try {
+      const dataUrl = await blobADataUrl(immagine);
+      const img = await caricaImmagine(dataUrl);
+      paginePronte.push({ dataUrl, img });
+    } catch (err) {
+      console.error('Foto non leggibile, saltata nell\'export:', immagine, err);
+      scartate++;
+    }
+  }
+
+  if (paginePronte.length === 0) {
+    alert(`Nessuna foto leggibile da esportare (${scartate} scartate perché corrotte).`);
+    return;
+  }
+
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const margine = 10;
 
-  for (let i = 0; i < immagini.length; i++) {
+  paginePronte.forEach(({ dataUrl, img }, i) => {
     if (i > 0) doc.addPage();
-
-    const dataUrl = await blobADataUrl(immagini[i]);
-    const img = await caricaImmagine(dataUrl);
 
     const maxW = pageW - margine * 2;
     const maxH = pageH - margine * 2;
@@ -1366,9 +1384,12 @@ async function esportaFotoBooklet(immagini, nomeFile, messaggioVuoto) {
     const y = (pageH - h) / 2;
 
     doc.addImage(dataUrl, 'JPEG', x, y, w, h);
-  }
+  });
 
   doc.save(nomeFile);
+  if (scartate > 0) {
+    alert(`Esportate ${paginePronte.length} foto. ${scartate} scontrini avevano una foto non leggibile (corrotta) e sono stati saltati: controllali nell'elenco spese.`);
+  }
 }
 
 async function esportaPdf(categoria, meseAnno) {
@@ -2928,6 +2949,281 @@ abilitaDettatura(el.inputSmartNote, el.btnMicSmartNote);
 abilitaDettaturaGiornata(el.btnMicGiornata, el.statoDettaturaGiornata);
 
 /* =========================================================
+   SINCRONIZZAZIONE COL BACKEND CONDIVISO (Fase 2 — silenziosa)
+
+   IndexedDB resta la fonte di verità locale, invariata: l'app scrive lì per
+   prima e funziona identica anche offline. In background, ogni spesa viene
+   spinta al backend (stesso Worker Cloudflare già usato per l'IA) quando c'è
+   rete; se manca la rete o qualcosa fallisce, non succede NULLA di visibile
+   per chi usa l'app — resta "in_attesa" e riparte da sola al prossimo giro.
+   Nessuna schermata di login ancora: l'identità del dipendente su un dato
+   telefono viene stabilita in automatico con un PIN generato a caso e mai
+   mostrato, che il vero login (Fase 4) sostituirà quando arriverà.
+
+   Tutte le operazioni di sync passano da un'unica coda (accodaSync): mai più
+   di una alla volta. Senza questo, un pull e un'eliminazione partiti quasi
+   nello stesso momento potevano intrecciarsi in ordini imprevedibili e far
+   "resuscitare" in locale una spesa appena eliminata — bug reale, trovato
+   testando a fondo prima del push, non solo teorico.
+   ========================================================= */
+
+let codaSync = Promise.resolve();
+function accodaSync(azione) {
+  const prossima = codaSync.then(azione, azione);
+  codaSync = prossima.catch(() => {}); // un fallimento non deve bloccare la coda per sempre
+  return prossima;
+}
+
+async function ottieniTokenSync() {
+  const dipendente = localStorage.getItem('dipendenteAttivo');
+  if (!dipendente) return null;
+
+  const chiavePin = `sync_pin__${dipendente}`;
+  const chiaveToken = `sync_token__${dipendente}`;
+
+  const tokenEsistente = localStorage.getItem(chiaveToken);
+  if (tokenEsistente) return tokenEsistente;
+
+  let pin = localStorage.getItem(chiavePin);
+  if (!pin) {
+    pin = String(Math.floor(100000 + Math.random() * 900000));
+    let rispostaRegistra;
+    try {
+      rispostaRegistra = await fetch(`${AI_WORKER_URL}/registra-pin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nome: dipendente, pin })
+      });
+    } catch (e) {
+      return null; // offline: niente sync per ora, riproverà più tardi
+    }
+    if (rispostaRegistra.ok) {
+      localStorage.setItem(chiavePin, pin);
+    } else {
+      // 409 = nome già registrato altrove (altro telefono, o già in Fase 4 col
+      // PIN vero): questo dispositivo resta silenziosamente senza sync finché
+      // non arriva un login esplicito. Qualsiasi altro errore: stesso esito.
+      return null;
+    }
+  }
+
+  let rispostaLogin;
+  try {
+    rispostaLogin = await fetch(`${AI_WORKER_URL}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome: dipendente, pin })
+    });
+  } catch (e) {
+    return null;
+  }
+  if (!rispostaLogin.ok) return null;
+
+  const dati = await rispostaLogin.json();
+  localStorage.setItem(chiaveToken, dati.token);
+  return dati.token;
+}
+
+async function segnalaErroreSync(tabella, recordId, errore) {
+  try {
+    const token = await ottieniTokenSync();
+    if (!token) return;
+    await fetch(`${AI_WORKER_URL}/sync-errore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ tabella, recordId, errore: String(errore).slice(0, 500) })
+    });
+  } catch (e) {
+    // Anche questo deve fallire in silenzio: è solo un log per controllo mio.
+  }
+}
+
+function sincronizzaSpesa(spesa) {
+  return accodaSync(() => sincronizzaSpesaInterno(spesa));
+}
+
+async function sincronizzaSpesaInterno(spesa) {
+  if (!spesa.syncId) return;
+  // Se questa spesa è stata eliminata mentre la sua sincronizzazione era ancora
+  // in coda (es. dietro un pull lento), non va rimandata in vita: bug reale,
+  // trovato testando — una push "vecchia" può altrimenti far ricomparire sul
+  // server (e quindi in locale) una spesa che l'utente ha già cancellato.
+  if (elencoEliminazioniPendenti().includes(spesa.syncId)) return;
+  try {
+    const token = await ottieniTokenSync();
+    if (!token) return;
+
+    const immagineBase64 = spesa.immagine ? (await blobToBase64(spesa.immagine)).split(',')[1] : null;
+
+    const risposta = await fetch(`${AI_WORKER_URL}/spese`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({
+        id: spesa.syncId,
+        meseAnno: spesa.meseAnno,
+        data: spesa.data,
+        esercente: spesa.esercente,
+        luogo: spesa.luogo,
+        descrizione: spesa.descrizione,
+        giustificativo: spesa.giustificativo,
+        pagamento: spesa.pagamento,
+        importo: spesa.importo,
+        note: spesa.note,
+        categoria: spesa.categoria,
+        immagineBase64,
+        provenienza: spesa.provenienza,
+        creatoIl: spesa.creatoIl
+      })
+    });
+
+    // L'eliminazione può essere arrivata PROPRIO mentre questa richiesta era in
+    // volo (non è bloccata dalla coda, è un'azione istantanea dell'utente): se è
+    // successo, il salvataggio appena fatto va disfatto subito, non solo ignorato,
+    // altrimenti la spesa resta comunque risuscitata sul server.
+    if (elencoEliminazioniPendenti().includes(spesa.syncId)) {
+      if (risposta.ok) eliminaSpesaSulServerInterno(spesa.syncId);
+      return;
+    }
+
+    if (risposta.ok) {
+      await aggiornaSpesa({ ...spesa, syncStato: 'sincronizzata' });
+    } else {
+      const corpo = await risposta.json().catch(() => ({}));
+      await aggiornaSpesa({ ...spesa, syncStato: 'errore' });
+      await segnalaErroreSync('spese', spesa.syncId, corpo.errore || `HTTP ${risposta.status}`);
+    }
+  } catch (e) {
+    // Offline o rete instabile: resta "in_attesa", ritenterà al prossimo giro.
+  }
+}
+
+// Elenco locale delle spese eliminate qui ma non ancora confermate cancellate
+// sul server: senza questo, un pull che arriva prima che la cancellazione
+// remota sia completata rimetterebbe in vita la spesa appena eliminata (bug
+// reale, trovato testando: eliminare e scaricare quasi nello stesso momento
+// la resuscitava). Il pull controlla sempre questo elenco prima di reinserire
+// qualcosa, quindi l'ordine con cui le due operazioni finiscono non conta più.
+function elencoEliminazioniPendenti() {
+  try {
+    return JSON.parse(localStorage.getItem('sync_eliminazioni_pendenti') || '[]');
+  } catch (e) {
+    return [];
+  }
+}
+
+function aggiungiEliminazionePendente(syncId) {
+  if (!syncId) return;
+  const elenco = elencoEliminazioniPendenti();
+  if (!elenco.includes(syncId)) {
+    elenco.push(syncId);
+    localStorage.setItem('sync_eliminazioni_pendenti', JSON.stringify(elenco));
+  }
+}
+
+function rimuoviEliminazionePendente(syncId) {
+  const elenco = elencoEliminazioniPendenti().filter(id => id !== syncId);
+  localStorage.setItem('sync_eliminazioni_pendenti', JSON.stringify(elenco));
+}
+
+function eliminaSpesaSulServer(syncId) {
+  if (!syncId) return;
+  aggiungiEliminazionePendente(syncId); // subito e sincrono, prima di accodare
+  return accodaSync(() => eliminaSpesaSulServerInterno(syncId));
+}
+
+async function eliminaSpesaSulServerInterno(syncId) {
+  try {
+    const token = await ottieniTokenSync();
+    if (!token) return; // resta in sospeso: ritenterà al prossimo giro online
+    const risposta = await fetch(`${AI_WORKER_URL}/spese/${syncId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (risposta.ok || risposta.status === 404) {
+      rimuoviEliminazionePendente(syncId);
+    }
+  } catch (e) {
+    // Offline: resta in sospeso, ritenterà al prossimo giro online.
+  }
+}
+
+async function sincronizzaEliminazioniPendenti() {
+  for (const syncId of elencoEliminazioniPendenti()) {
+    await eliminaSpesaSulServer(syncId);
+  }
+}
+
+async function sincronizzaSpesePendenti() {
+  let tutte;
+  try {
+    tutte = await getTutteLeSpese();
+  } catch (e) {
+    return;
+  }
+  for (const spesa of tutte) {
+    if (spesa.syncStato === 'sincronizzata') continue;
+    if (!spesa.syncId) {
+      spesa.syncId = crypto.randomUUID();
+      await aggiornaSpesa(spesa);
+    }
+    await sincronizzaSpesa(spesa);
+  }
+}
+
+function scaricaSpeseDalServer(meseAnno) {
+  return accodaSync(() => scaricaSpeseDalServerInterno(meseAnno));
+}
+
+async function scaricaSpeseDalServerInterno(meseAnno) {
+  try {
+    const token = await ottieniTokenSync();
+    if (!token) return;
+
+    const risposta = await fetch(`${AI_WORKER_URL}/spese?meseAnno=${encodeURIComponent(meseAnno)}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!risposta.ok) return;
+
+    const { spese: speseServer } = await risposta.json();
+    const speseLocali = await getSpeseDelMese(meseAnno);
+    const syncIdGiaPresenti = new Set(speseLocali.map(s => s.syncId).filter(Boolean));
+    const syncIdInEliminazione = new Set(elencoEliminazioniPendenti());
+
+    let mancavaQualcosa = false;
+    for (const s of speseServer) {
+      if (syncIdGiaPresenti.has(s.id)) continue;
+      if (syncIdInEliminazione.has(s.id)) continue;
+      mancavaQualcosa = true;
+      await salvaSpesa({
+        meseAnno: s.meseAnno,
+        data: s.data,
+        esercente: s.esercente,
+        luogo: s.luogo,
+        descrizione: s.descrizione,
+        giustificativo: s.giustificativo,
+        pagamento: s.pagamento,
+        importo: s.importo,
+        note: s.note,
+        categoria: s.categoria,
+        immagine: s.immagine ? base64ToBlob(`data:image/jpeg;base64,${s.immagine}`) : null,
+        provenienza: s.provenienza,
+        creatoIl: s.creatoIl,
+        syncId: s.id,
+        syncStato: 'sincronizzata'
+      });
+    }
+    if (mancavaQualcosa) await aggiornaRimborso();
+  } catch (e) {
+    // Silenzioso: senza rete semplicemente non si scarica nulla di nuovo ora.
+  }
+}
+
+window.addEventListener('online', () => { sincronizzaSpesePendenti(); sincronizzaEliminazioniPendenti(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') { sincronizzaSpesePendenti(); sincronizzaEliminazioniPendenti(); }
+});
+
+/* =========================================================
    RIMBORSO
    ========================================================= */
 
@@ -2980,6 +3276,8 @@ async function aggiornaRimborso() {
 
   renderListaSpese(spese, chiuso);
   await aggiornaStatoFirma();
+
+  scaricaSpeseDalServer(stato.meseAttivoRimborso); // in background, non blocca il render
 }
 
 function formattaDataSicura(data) {
@@ -3130,7 +3428,9 @@ async function eliminaSpesaConferma(spesa) {
   const conferma = await chiediConferma(`Eliminare la spesa "${spesa.esercente}" del ${dataEtichetta}?`);
   if (!conferma) return;
   await eliminaSpesa(spesa.id);
+  aggiungiEliminazionePendente(spesa.syncId); // subito, prima del pull che segue in aggiornaRimborso
   await aggiornaRimborso();
+  eliminaSpesaSulServer(spesa.syncId); // in background
 }
 
 async function chiudiMeseRimborso() {
@@ -3763,17 +4063,25 @@ async function salvaFormSpesa(e) {
     categoria: categoriaEl ? categoriaEl.value : null,
     immagine: stato.fotoSpesaCorrente || null,
     provenienza: stato.spesaInModifica ? (stato.spesaInModifica.provenienza || null) : null,
-    creatoIl: stato.spesaInModifica ? stato.spesaInModifica.creatoIl : new Date().toISOString()
+    creatoIl: stato.spesaInModifica ? stato.spesaInModifica.creatoIl : new Date().toISOString(),
+    syncId: stato.spesaInModifica ? (stato.spesaInModifica.syncId || crypto.randomUUID()) : crypto.randomUUID(),
+    syncStato: 'in_attesa'
   };
 
   if (stato.spesaInModifica) {
     spesa.id = stato.spesaInModifica.id;
     await aggiornaSpesa(spesa);
   } else {
-    await salvaSpesa(spesa);
+    // salvaSpesa (store.add) genera l'id ma non lo scrive sull'oggetto in
+    // memoria: senza recuperarlo qui, la sincronizzazione in background che
+    // segue userebbe aggiornaSpesa (store.put) su un oggetto senza id, e
+    // IndexedDB creerebbe una SECONDA riga invece di aggiornare la prima —
+    // bug reale, trovato testando a fondo prima del push.
+    spesa.id = await salvaSpesa(spesa);
   }
   chiudiFormSpesa();
   await aggiornaRimborso();
+  sincronizzaSpesa(spesa); // in background, non blocca il salvataggio
 }
 
 el.btnTornaHubRimborso.addEventListener('click', tornaAllHubDaRimborso);
@@ -3882,6 +4190,12 @@ async function esportaBackupCompleto() {
   const firmeSerializzate = await Promise.all(
     firme.map(async (f) => ({ ...f, immagine: await blobToBase64(f.immagine) }))
   );
+  // Un Blob non sopravvive a JSON.stringify (diventa "{}"): le spese con foto
+  // allegata vanno convertite in base64 esattamente come ricevute e firme,
+  // altrimenti la foto viene silenziosamente persa ad ogni backup/ripristino.
+  const speseSerializzate = await Promise.all(
+    spese.map(async (s) => ({ ...s, immagine: s.immagine ? await blobToBase64(s.immagine) : null }))
+  );
 
   const backup = {
     versione: 1,
@@ -3889,7 +4203,7 @@ async function esportaBackupCompleto() {
     dipendenteAttivo: localStorage.getItem('dipendenteAttivo') || null,
     ricevute: ricevuteSerializzate,
     statoMesi,
-    spese,
+    spese: speseSerializzate,
     statoMesiRimborso,
     firme: firmeSerializzate,
     anagraficheAttivita,
@@ -3951,7 +4265,7 @@ async function ripristinaDaTesto(testo) {
     await scriviRecordConId(STORE_STATO_MESI, s);
   }
   for (const s of backup.spese || []) {
-    await scriviRecordConId(STORE_SPESE, s);
+    await scriviRecordConId(STORE_SPESE, { ...s, immagine: s.immagine ? base64ToBlob(s.immagine) : null });
   }
   for (const s of backup.statoMesiRimborso || []) {
     await scriviRecordConId(STORE_STATO_MESI_RIMBORSO, s);
@@ -4003,6 +4317,9 @@ async function avvia() {
   if (navigator.storage && navigator.storage.persist) {
     navigator.storage.persist().catch(() => {});
   }
+
+  sincronizzaSpesePendenti(); // in background, non ritarda l'avvio
+  sincronizzaEliminazioniPendenti();
 }
 
 avvia();
