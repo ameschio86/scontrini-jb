@@ -87,7 +87,7 @@
       <input type="file" id="input-importa-backup" accept="application/json" class="hidden">
     </div>
 
-    <span id="hub-versione" class="hub-versione">v1.13</span>
+    <span id="hub-versione" class="hub-versione">v1.14</span>
   </section>
 
   <!-- ===================== VISTA DATI FATTURAZIONE ===================== -->
@@ -110,66 +110,6 @@
     <div class="fatturazione-qr">
       <img src="icons/qr-fatturazione.png" alt="QR code contatti fatturazione" id="img-qr-fatturazione">
     </div>
-  </section>
-
-  <!-- ===================== VISTA DASHBOARD ===================== -->
-  <section id="view-dashboard" class="view hidden">
-
-    <header class="app-header">
-      <button id="btn-torna-hub" class="btn-back" aria-label="Torna a Rimborso">← <span class="btn-back-label">BACK</span></button>
-      <h1 class="app-title">Archivio storico scontrini</h1>
-    </header>
-
-
-    <div class="month-selector">
-      <button id="btn-prev-month" class="btn-arrow" aria-label="Mese precedente">◀</button>
-      <div class="month-label-wrap">
-        <span id="month-label" class="month-label">—</span>
-        <span id="month-closed-badge" class="badge-closed hidden">✓ Mese chiuso</span>
-      </div>
-      <button id="btn-next-month" class="btn-arrow" aria-label="Mese successivo">▶</button>
-    </div>
-
-    <div class="counters">
-      <span id="counter-text">0 rimborsi · 0 gasolio</span>
-    </div>
-
-    <div class="capture-buttons">
-      <button id="btn-capture-generico" class="btn-capture btn-generico">
-        <span class="icon">📷</span>
-        <span>Scatta foto — Rimborso</span>
-      </button>
-      <button id="btn-capture-gasolio" class="btn-capture btn-gasolio">
-        <span class="icon">⛽</span>
-        <span>Scatta foto — Gasolio</span>
-      </button>
-    </div>
-
-    <button id="btn-reopen-month" class="btn-secondary hidden">🔓 Riapri mese</button>
-
-    <div id="gallery" class="gallery"></div>
-    <p id="gallery-empty" class="gallery-empty hidden">Nessuna ricevuta per questo mese.</p>
-
-    <div class="export-buttons">
-      <button id="btn-export-generico" class="btn-export">Esporta ricevute mese attivo</button>
-      <button id="btn-export-gasolio" class="btn-export">Esporta ricevute gasolio mese attivo</button>
-    </div>
-
-    <button id="btn-close-month" class="btn-close-month">Chiudi mese</button>
-
-    <nav class="secondary-nav">
-      <a href="#" id="link-archive">Mesi precedenti</a>
-    </nav>
-
-  </section>
-
-  <!-- ===================== VISTA ARCHIVIO ===================== -->
-  <section id="view-archive" class="view hidden">
-    <header class="app-header">
-      <button id="btn-archive-back" class="btn-back" aria-label="Torna alla dashboard">←</button>
-      <h1 class="app-title">Mesi precedenti</h1>
-    </header>
-    <div id="archive-list" class="archive-list"></div>
   </section>
 
   <!-- ===================== VISTA RIMBORSO ===================== -->
@@ -225,9 +165,6 @@
     </div>
     <input type="file" id="input-firma-upload" accept="image/*" class="hidden">
 
-    <nav class="secondary-nav">
-      <a href="#" id="link-archivio-storico">🗂 Archivio storico scontrini</a>
-    </nav>
   </section>
 
   <!-- ===================== VISTA FORM SPESA ===================== -->
@@ -319,8 +256,6 @@
 
     <div class="hub-backup">
       <button id="btn-apri-anagrafica" class="btn-backup-mini">🗂 Anagrafica clienti/cantieri</button>
-      <button id="btn-importa-attivita" class="btn-backup-mini">📥 Importa attività da file</button>
-      <input type="file" id="input-importa-attivita" accept="application/json" class="hidden">
     </div>
   </section>
 
@@ -475,16 +410,6 @@
     <div id="rifinisci-loading" class="rifinisci-loading hidden">Elaborazione…</div>
   </section>
 
-</div>
-
-<!-- ===================== OVERLAY ANTEPRIMA FOTO ===================== -->
-<div id="photo-overlay" class="photo-overlay hidden">
-  <button id="btn-overlay-close" class="overlay-close" aria-label="Chiudi">✕</button>
-  <img id="overlay-image" src="" alt="Ricevuta ingrandita">
-  <div class="overlay-info">
-    <span id="overlay-timestamp"></span>
-    <button id="btn-overlay-delete" class="btn-overlay-delete">🗑 Elimina</button>
-  </div>
 </div>
 
 <!-- ===================== TOAST / CONFERME ===================== -->

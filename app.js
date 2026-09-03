@@ -406,6 +406,7 @@ async function gestisciCaricamentoFirma(file) {
   const blobPulito = await pulisciFirma(canvas);
   await salvaFirma(dipendente, blobPulito);
   await aggiornaStatoFirma();
+  sincronizzaFirma(dipendente, blobPulito);
   alert(`Firma salvata per ${dipendente}.`);
 }
 
@@ -421,38 +422,6 @@ async function aggiornaStatoFirma() {
     ? `Firma salvata per ${dipendente}.`
     : `Nessuna firma salvata per ${dipendente} (il PDF verrà esportato senza firma).`;
   el.btnEliminaFirma.classList.toggle('hidden', !firma);
-}
-
-async function getTuttiIMesi() {
-  const [ricevuteDb, statiDb] = await Promise.all([
-    (async () => {
-      const { store } = await txStore(STORE_RICEVUTE, 'readonly');
-      return reqAsPromise(store.getAll());
-    })(),
-    (async () => {
-      const { store } = await txStore(STORE_STATO_MESI, 'readonly');
-      return reqAsPromise(store.getAll());
-    })()
-  ]);
-
-  const conteggi = new Map();
-  for (const r of ricevuteDb) {
-    if (!conteggi.has(r.meseAnno)) conteggi.set(r.meseAnno, { generico: 0, gasolio: 0 });
-    conteggi.get(r.meseAnno)[r.categoria === 'gasolio' ? 'gasolio' : 'generico']++;
-  }
-
-  const statiMap = new Map(statiDb.map(s => [s.meseAnno, s]));
-
-  const mesi = new Set([...conteggi.keys(), ...statiMap.keys()]);
-  const lista = [...mesi].map(meseAnno => ({
-    meseAnno,
-    generico: conteggi.get(meseAnno)?.generico || 0,
-    gasolio: conteggi.get(meseAnno)?.gasolio || 0,
-    chiuso: statiMap.get(meseAnno)?.chiuso || false
-  }));
-
-  lista.sort((a, b) => b.meseAnno.localeCompare(a.meseAnno));
-  return lista;
 }
 
 /* =========================================================
@@ -605,8 +574,6 @@ const el = {
   btnExportAttivita: document.getElementById('btn-export-attivita'),
   btnCloseMonthAttivita: document.getElementById('btn-close-month-attivita'),
   btnApriAnagrafica: document.getElementById('btn-apri-anagrafica'),
-  btnImportaAttivita: document.getElementById('btn-importa-attivita'),
-  inputImportaAttivita: document.getElementById('input-importa-attivita'),
 
   viewAnagrafica: document.getElementById('view-attivita-anagrafica'),
   btnAnagraficaAnnulla: document.getElementById('btn-anagrafica-annulla'),
@@ -653,7 +620,6 @@ const el = {
   viewFatturazione: document.getElementById('view-fatturazione'),
   btnTornaHubFatturazione: document.getElementById('btn-torna-hub-fatturazione'),
   imgQrFatturazione: document.getElementById('img-qr-fatturazione'),
-  btnTornaHub: document.getElementById('btn-torna-hub'),
 
   viewRimborso: document.getElementById('view-rimborso'),
   btnTornaHubRimborso: document.getElementById('btn-torna-hub-rimborso'),
@@ -675,7 +641,6 @@ const el = {
   totaleDipendente: document.getElementById('totale-dipendente'),
   btnExportScontriniGenerico: document.getElementById('btn-export-scontrini-generico'),
   btnExportScontriniGasolio: document.getElementById('btn-export-scontrini-gasolio'),
-  linkArchivioStorico: document.getElementById('link-archivio-storico'),
 
   viewSpesaForm: document.getElementById('view-spesa-form'),
   formSpesa: document.getElementById('form-spesa'),
@@ -693,30 +658,7 @@ const el = {
   inputSpesaImporto: document.getElementById('input-spesa-importo'),
   inputSpesaNote: document.getElementById('input-spesa-note'),
 
-  viewDashboard: document.getElementById('view-dashboard'),
-  viewArchive: document.getElementById('view-archive'),
   viewCamera: document.getElementById('view-camera'),
-
-  btnPrevMonth: document.getElementById('btn-prev-month'),
-  btnNextMonth: document.getElementById('btn-next-month'),
-  monthLabel: document.getElementById('month-label'),
-  monthClosedBadge: document.getElementById('month-closed-badge'),
-  counterText: document.getElementById('counter-text'),
-
-  btnCaptureGenerico: document.getElementById('btn-capture-generico'),
-  btnCaptureGasolio: document.getElementById('btn-capture-gasolio'),
-  btnReopenMonth: document.getElementById('btn-reopen-month'),
-
-  gallery: document.getElementById('gallery'),
-  galleryEmpty: document.getElementById('gallery-empty'),
-
-  btnExportGenerico: document.getElementById('btn-export-generico'),
-  btnExportGasolio: document.getElementById('btn-export-gasolio'),
-  btnCloseMonth: document.getElementById('btn-close-month'),
-
-  linkArchive: document.getElementById('link-archive'),
-  btnArchiveBack: document.getElementById('btn-archive-back'),
-  archiveList: document.getElementById('archive-list'),
 
   cameraVideo: document.getElementById('camera-video'),
   cameraCanvas: document.getElementById('camera-canvas'),
@@ -740,12 +682,6 @@ const el = {
   btnRifinisciAnnulla: document.getElementById('btn-rifinisci-annulla'),
   btnRifinisciConferma: document.getElementById('btn-rifinisci-conferma'),
   rifinisciLoading: document.getElementById('rifinisci-loading'),
-
-  photoOverlay: document.getElementById('photo-overlay'),
-  overlayImage: document.getElementById('overlay-image'),
-  overlayTimestamp: document.getElementById('overlay-timestamp'),
-  btnOverlayClose: document.getElementById('btn-overlay-close'),
-  btnOverlayDelete: document.getElementById('btn-overlay-delete'),
 
   confirmDialog: document.getElementById('confirm-dialog'),
   confirmMessage: document.getElementById('confirm-message'),
@@ -790,131 +726,8 @@ function eseguiConGestioneErrori(azioneAsync, descrizioneAzione) {
 }
 
 /* =========================================================
-   NAVIGAZIONE MESE ATTIVO
-   ========================================================= */
-
-async function determinaMeseAttivoIniziale() {
-  const correnteMese = meseAnnoCorrente();
-  const mesi = await getTuttiIMesi();
-  const precedentiAperti = mesi
-    .filter(m => m.meseAnno < correnteMese && !m.chiuso && (m.generico + m.gasolio) > 0)
-    .sort((a, b) => a.meseAnno.localeCompare(b.meseAnno));
-
-  return precedentiAperti.length > 0 ? precedentiAperti[0].meseAnno : correnteMese;
-}
-
-async function cambiaMese(delta) {
-  stato.meseAttivo = aggiungiMesi(stato.meseAttivo, delta);
-  await aggiornaDashboard();
-}
-
-/* =========================================================
-   RENDER DASHBOARD
-   ========================================================= */
-
-async function aggiornaDashboard() {
-  el.monthLabel.textContent = etichettaMese(stato.meseAttivo);
-
-  const [statoMese, ricevute] = await Promise.all([
-    getStatoMese(stato.meseAttivo),
-    getRicevuteDelMese(stato.meseAttivo)
-  ]);
-
-  const chiuso = statoMese.chiuso;
-  el.monthClosedBadge.classList.toggle('hidden', !chiuso);
-  el.btnCaptureGenerico.disabled = chiuso;
-  el.btnCaptureGasolio.disabled = chiuso;
-  el.btnReopenMonth.classList.toggle('hidden', !chiuso);
-
-  const generico = ricevute.filter(r => r.categoria === 'generico').length;
-  const gasolio = ricevute.filter(r => r.categoria === 'gasolio').length;
-  el.counterText.textContent = `${generico} rimborsi · ${gasolio} gasolio`;
-
-  renderGalleria(ricevute);
-}
-
-function renderGalleria(ricevute) {
-  el.gallery.innerHTML = '';
-  const ordinate = [...ricevute].sort((a, b) => chiaveOrdinamento(b).localeCompare(chiaveOrdinamento(a)) || b.timestamp.localeCompare(a.timestamp));
-
-  el.galleryEmpty.classList.toggle('hidden', ordinate.length > 0);
-
-  for (const r of ordinate) {
-    const div = document.createElement('div');
-    div.className = 'thumb';
-    div.dataset.id = r.id;
-
-    const img = document.createElement('img');
-    img.src = URL.createObjectURL(r.immagine);
-    img.loading = 'lazy';
-    div.appendChild(img);
-
-    const badge = document.createElement('span');
-    badge.className = 'thumb-badge';
-    badge.textContent = r.categoria === 'gasolio' ? '⛽' : '📷';
-    div.appendChild(badge);
-
-    div.addEventListener('click', () => apriOverlay(r));
-    el.gallery.appendChild(div);
-  }
-}
-
-/* =========================================================
-   OVERLAY ANTEPRIMA / ELIMINAZIONE
-   ========================================================= */
-
-function apriOverlay(ricevuta) {
-  stato.overlayRicevutaId = ricevuta.id;
-  el.overlayImage.src = URL.createObjectURL(ricevuta.immagine);
-  const caricata = new Date(ricevuta.timestamp).toLocaleString('it-IT', {
-    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
-  });
-  if (ricevuta.dataScontrino) {
-    el.overlayTimestamp.textContent = `Scontrino del ${etichettaDataScontrino(ricevuta.dataScontrino)} · caricato il ${caricata}`;
-  } else {
-    el.overlayTimestamp.textContent = `Caricato il ${caricata}`;
-  }
-  el.photoOverlay.classList.remove('hidden');
-}
-
-function chiudiOverlay() {
-  el.photoOverlay.classList.add('hidden');
-  stato.overlayRicevutaId = null;
-}
-
-async function eliminaRicevutaCorrente() {
-  const conferma = await chiediConferma('Eliminare definitivamente questa ricevuta?');
-  if (!conferma) return;
-  await eliminaRicevuta(stato.overlayRicevutaId);
-  chiudiOverlay();
-  await aggiornaDashboard();
-}
-
-/* =========================================================
    FOTOCAMERA
    ========================================================= */
-
-async function apriFotocamera(categoria) {
-  stato.cameraContesto = 'scontrino';
-  stato.cameraCategoria = categoria;
-  el.cameraCategoryLabel.textContent = categoria === 'gasolio' ? '⛽ Gasolio' : '📷 Rimborso';
-  el.viewCamera.classList.remove('hidden');
-
-  try {
-    stato.cameraStream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: { ideal: 'environment' },
-        width: { ideal: 2560 },
-        height: { ideal: 1440 }
-      },
-      audio: false
-    });
-    el.cameraVideo.srcObject = stato.cameraStream;
-  } catch (err) {
-    alert('Impossibile accedere alla fotocamera: ' + err.message);
-    chiudiFotocamera();
-  }
-}
 
 async function apriFotocameraSpesaAI() {
   stato.cameraContesto = 'spesa-ai';
@@ -1002,18 +815,11 @@ function scattaFoto() {
   grezza.height = canvas.height;
   grezza.getContext('2d').drawImage(canvas, 0, 0);
 
-  if (stato.cameraContesto === 'spesa-ai') {
-    // Il ritaglio sfondo/scontrino per il rimborso lo tenta in automatico l'IA
-    // (dai blocchi di testo individuati dall'OCR): niente trascina-angoli manuale,
-    // a meno che l'IA non riesca a isolare un riquadro affidabile (vedi elaboraScontrinoAI).
-    chiudiFotocamera();
-    elaboraScontrinoAI(grezza);
-    return;
-  }
-
-  stato.fotoGrezza = grezza;
+  // Il ritaglio sfondo/scontrino per il rimborso lo tenta in automatico l'IA
+  // (dai blocchi di testo individuati dall'OCR): niente trascina-angoli manuale,
+  // a meno che l'IA non riesca a isolare un riquadro affidabile (vedi elaboraScontrinoAI).
   chiudiFotocamera();
-  apriRifinisci();
+  elaboraScontrinoAI(grezza);
 }
 
 function mostraFlash(elemento) {
@@ -1263,58 +1069,19 @@ async function confermaRifinisci() {
       Math.max(200, altOutput)
     );
 
-    if (stato.cameraContesto === 'spesa-ai') {
-      // A questo punto i dati sono già stati letti dall'IA (siamo qui solo perché
-      // non era riuscita a isolare da sola un riquadro affidabile): il ritaglio
-      // manuale serve solo per la foto, non va rifatta la lettura.
-      const blobRitagliato = await comprimiImmagine(warpCanvas);
-      impostaFotoSpesa(blobRitagliato);
-      await mostraFlash(el.rifinisciFlash);
-      chiudiRifinisci();
-      el.statoScattaRimborso.classList.remove('hidden');
-      el.statoScattaRimborso.textContent = '✅ Foto ritagliata. Controlla i dati prima di salvare.';
-      setTimeout(() => el.statoScattaRimborso.classList.add('hidden'), 5000);
-      return;
-    }
-
-    const blob = await comprimiImmagine(warpCanvas);
-    const dataScontrino = el.inputDataRifinisci.value || dataISOCorrente();
-    stato.dataScontrino = dataScontrino;
-
-    await salvaRicevuta({
-      categoria: stato.cameraCategoria,
-      timestamp: new Date().toISOString(),
-      meseAnno: stato.meseAttivo,
-      dataScontrino,
-      immagine: blob
-    });
-
+    // A questo punto i dati sono già stati letti dall'IA (siamo qui solo perché
+    // non era riuscita a isolare da sola un riquadro affidabile): il ritaglio
+    // manuale serve solo per la foto, non va rifatta la lettura.
+    const blobRitagliato = await comprimiImmagine(warpCanvas);
+    impostaFotoSpesa(blobRitagliato);
     await mostraFlash(el.rifinisciFlash);
     chiudiRifinisci();
-    await aggiornaDashboard();
+    el.statoScattaRimborso.classList.remove('hidden');
+    el.statoScattaRimborso.textContent = '✅ Foto ritagliata. Controlla i dati prima di salvare.';
+    setTimeout(() => el.statoScattaRimborso.classList.add('hidden'), 5000);
   } finally {
     el.rifinisciLoading.classList.add('hidden');
   }
-}
-
-/* =========================================================
-   CHIUSURA / RIAPERTURA MESE
-   ========================================================= */
-
-async function chiudiMese() {
-  const conferma = await chiediConferma(
-    `Hai già esportato i PDF di ${etichettaMese(stato.meseAttivo)}? Chiudendo il mese, i pulsanti di scatto verranno disattivati (potrai comunque riaprirlo in seguito).`
-  );
-  if (!conferma) return;
-  await setStatoMese(stato.meseAttivo, true);
-  await aggiornaDashboard();
-}
-
-async function riapriMese() {
-  const conferma = await chiediConferma(`Riaprire ${etichettaMese(stato.meseAttivo)} per modificarlo?`);
-  if (!conferma) return;
-  await setStatoMese(stato.meseAttivo, false);
-  await aggiornaDashboard();
 }
 
 /* =========================================================
@@ -1392,27 +1159,13 @@ async function esportaFotoBooklet(immagini, nomeFile, messaggioVuoto) {
   }
 }
 
-async function esportaPdf(categoria, meseAnno) {
-  // Il rimborso ("generico") include anche gli scontrini gasolio: un gasolio
-  // e' comunque un rimborso, oltre a comparire nel suo export specifico.
-  const ricevute = categoria === 'generico'
-    ? await getRicevuteDelMese(meseAnno)
-    : await getRicevuteDelMesePerCategoria(meseAnno, categoria);
-
-  await esportaFotoBooklet(
-    ricevute.map(r => r.immagine),
-    nomeFileExport(categoria, meseAnno),
-    `Nessuna ricevuta ${categoria === 'gasolio' ? 'gasolio' : 'rimborso'} da esportare per ${etichettaMese(meseAnno)}.`
-  );
-}
-
 async function getSpeseConFotoDelMese(meseAnno, categoria = null) {
   const spese = await getSpeseDelMese(meseAnno);
   return spese.filter(s => s.immagine && (categoria === null || s.categoria === categoria));
 }
 
 async function esportaScontriniDaSpese(categoria, meseAnno) {
-  // Lo stesso principio di esportaPdf: "generico" include anche i gasolio.
+  // "generico" include anche i gasolio: un gasolio e' comunque un rimborso.
   const spese = await getSpeseConFotoDelMese(meseAnno, categoria === 'generico' ? null : categoria);
 
   await esportaFotoBooklet(
@@ -1423,75 +1176,9 @@ async function esportaScontriniDaSpese(categoria, meseAnno) {
 }
 
 /* =========================================================
-   ARCHIVIO MESI PRECEDENTI
-   ========================================================= */
-
-async function apriArchivio() {
-  el.viewDashboard.classList.add('hidden');
-  el.viewArchive.classList.remove('hidden');
-  await renderArchivio();
-}
-
-function chiudiArchivio() {
-  el.viewArchive.classList.add('hidden');
-  el.viewDashboard.classList.remove('hidden');
-}
-
-async function renderArchivio() {
-  const mesi = await getTuttiIMesi();
-  el.archiveList.innerHTML = '';
-
-  if (mesi.length === 0) {
-    const p = document.createElement('p');
-    p.className = 'archive-empty';
-    p.textContent = 'Nessun mese registrato ancora.';
-    el.archiveList.appendChild(p);
-    return;
-  }
-
-  for (const m of mesi) {
-    const div = document.createElement('div');
-    div.className = 'archive-item';
-
-    const info = document.createElement('div');
-    info.className = 'archive-item-info';
-
-    const titolo = document.createElement('span');
-    titolo.className = 'archive-item-month';
-    titolo.textContent = etichettaMese(m.meseAnno);
-    info.appendChild(titolo);
-
-    const conteggio = document.createElement('span');
-    conteggio.className = 'archive-item-count';
-    conteggio.textContent = `${m.generico} rimborsi · ${m.gasolio} gasolio`;
-    info.appendChild(conteggio);
-
-    div.appendChild(info);
-
-    const badge = document.createElement('span');
-    badge.className = 'archive-item-status ' + (m.chiuso ? 'status-closed' : 'status-open');
-    badge.textContent = m.chiuso ? 'Chiuso' : 'Aperto';
-    div.appendChild(badge);
-
-    div.addEventListener('click', async () => {
-      stato.meseAttivo = m.meseAnno;
-      chiudiArchivio();
-      await aggiornaDashboard();
-    });
-
-    el.archiveList.appendChild(div);
-  }
-}
-
-/* =========================================================
    EVENT LISTENER
    ========================================================= */
 
-el.btnPrevMonth.addEventListener('click', () => cambiaMese(-1));
-el.btnNextMonth.addEventListener('click', () => cambiaMese(1));
-
-el.btnCaptureGenerico.addEventListener('click', () => apriFotocamera('generico'));
-el.btnCaptureGasolio.addEventListener('click', () => apriFotocamera('gasolio'));
 el.btnCameraShutter.addEventListener('click', scattaFoto);
 el.btnCameraCancel.addEventListener('click', chiudiFotocamera);
 
@@ -1502,18 +1189,6 @@ el.rifinisciStage.addEventListener('pointercancel', onStagePointerUp);
 el.btnRifinisciAnnulla.addEventListener('click', annullaRifinisci);
 el.btnRifinisciConferma.addEventListener('click', confermaRifinisci);
 
-el.btnReopenMonth.addEventListener('click', riapriMese);
-el.btnCloseMonth.addEventListener('click', chiudiMese);
-
-el.btnExportGenerico.addEventListener('click', eseguiConGestioneErrori(() => esportaPdf('generico', stato.meseAttivo), 'Esporta ricevute rimborso'));
-el.btnExportGasolio.addEventListener('click', eseguiConGestioneErrori(() => esportaPdf('gasolio', stato.meseAttivo), 'Esporta ricevute gasolio'));
-
-el.linkArchive.addEventListener('click', (e) => { e.preventDefault(); apriArchivio(); });
-el.btnArchiveBack.addEventListener('click', chiudiArchivio);
-
-el.btnOverlayClose.addEventListener('click', chiudiOverlay);
-el.btnOverlayDelete.addEventListener('click', eliminaRicevutaCorrente);
-
 /* =========================================================
    HUB / DIPENDENTE ATTIVO
    ========================================================= */
@@ -1521,17 +1196,6 @@ el.btnOverlayDelete.addEventListener('click', eliminaRicevutaCorrente);
 function inizializzaDipendente() {
   const salvato = localStorage.getItem('dipendenteAttivo');
   if (salvato) el.selectDipendente.value = salvato;
-}
-
-async function apriArchivioStorico() {
-  el.viewRimborso.classList.add('hidden');
-  el.viewDashboard.classList.remove('hidden');
-  await aggiornaDashboard();
-}
-
-function tornaAllHub() {
-  el.viewDashboard.classList.add('hidden');
-  el.viewRimborso.classList.remove('hidden');
 }
 
 function apriFatturazione() {
@@ -1587,6 +1251,8 @@ async function aggiornaAttivita() {
   el.btnReopenMonthAttivita.classList.toggle('hidden', !chiuso);
 
   renderListaGiorniAttivita(giorni, chiuso);
+  scaricaRisorsaDalServer(RISORSA_ATTIVITA_GIORNI, stato.meseAttivoAttivita);
+  scaricaStatoMeseSeDiverso('attivita', stato.meseAttivoAttivita, chiuso, setStatoMeseAttivita, aggiornaAttivita);
 }
 
 function renderListaGiorniAttivita(giorni, meseChiuso) {
@@ -1699,8 +1365,11 @@ async function eliminaGiornoAttivitaConferma(giorno) {
   const dataEtichetta = parseDataISO(giorno.data).toLocaleDateString('it-IT');
   const conferma = await chiediConferma(`Eliminare la giornata del ${dataEtichetta}?`);
   if (!conferma) return;
+  const syncId = giorno.syncId;
+  if (syncId) aggiungiEliminazionePendente(syncId, 'attivita-giorni');
   await eliminaGiornoAttivita(giorno.id);
   await aggiornaAttivita();
+  eliminaRecordSulServer(RISORSA_ATTIVITA_GIORNI, syncId);
 }
 
 async function chiudiMeseAttivita() {
@@ -1710,6 +1379,7 @@ async function chiudiMeseAttivita() {
   if (!conferma) return;
   await setStatoMeseAttivita(stato.meseAttivoAttivita, true);
   await aggiornaAttivita();
+  sincronizzaStatoMese('attivita', stato.meseAttivoAttivita, true);
 }
 
 async function riapriMeseAttivita() {
@@ -1717,6 +1387,7 @@ async function riapriMeseAttivita() {
   if (!conferma) return;
   await setStatoMeseAttivita(stato.meseAttivoAttivita, false);
   await aggiornaAttivita();
+  sincronizzaStatoMese('attivita', stato.meseAttivoAttivita, false);
 }
 
 /* =========================================================
@@ -1735,6 +1406,7 @@ async function apriAnagrafica() {
   el.inputOrarioInizio.value = anagrafica.orarioInizio || '08:00';
   el.inputOrarioFine.value = anagrafica.orarioFine || '17:00';
   renderAnagraficaClienti();
+  scaricaAnagraficaSeMancante(dipendente); // in background: se manca in locale, la prossima apertura la troverà
 
   el.viewAttivita.classList.add('hidden');
   el.viewAnagrafica.classList.remove('hidden');
@@ -1842,13 +1514,15 @@ async function salvaAnagraficaDaForm() {
         .map(sc => ({ codice: sc.codice.trim(), cantieri: sc.cantieri }))
     }));
 
-  await salvaAnagraficaAttivita({
+  const record = {
     dipendente,
     tc: (el.inputTC.value || '').trim().toUpperCase(),
     orarioInizio: el.inputOrarioInizio.value || '08:00',
     orarioFine: el.inputOrarioFine.value || '17:00',
     clienti: clientiPuliti
-  });
+  };
+  await salvaAnagraficaAttivita(record);
+  sincronizzaAnagraficaAttivita(record);
 
   chiudiAnagrafica();
 }
@@ -2285,61 +1959,6 @@ async function elaboraScontrinoAI(canvas) {
   }
 }
 
-function recordGiornoValido(r) {
-  return r && typeof r === 'object' &&
-    typeof r.dipendente === 'string' && r.dipendente &&
-    typeof r.meseAnno === 'string' &&
-    typeof r.data === 'string' &&
-    typeof r.tipoGiorno === 'string' &&
-    Array.isArray(r.righe);
-}
-
-async function importaAttivitaDaFile(file) {
-  let record;
-  try {
-    const testo = await file.text();
-    record = JSON.parse(testo);
-  } catch (e) {
-    alert('File non valido: non è un JSON leggibile.');
-    return;
-  }
-  if (!Array.isArray(record) || record.length === 0 || !record.every(recordGiornoValido)) {
-    alert('File non valido: non contiene un elenco di giornate nel formato atteso.');
-    return;
-  }
-
-  const dipendenteFile = record[0].dipendente;
-  const dipendenteAttivo = localStorage.getItem('dipendenteAttivo');
-  const date = [...record].map(r => r.data).sort();
-  const primaData = parseDataISO(date[0]).toLocaleDateString('it-IT');
-  const ultimaData = parseDataISO(date[date.length - 1]).toLocaleDateString('it-IT');
-
-  let messaggio = `Importare ${record.length} giornate per ${dipendenteFile} (dal ${primaData} al ${ultimaData})? Verranno aggiunte solo alle Attività: Rimborsi e Scontrini non vengono toccati.`;
-  if (dipendenteFile !== dipendenteAttivo) {
-    messaggio += `\n\nAttenzione: il dipendente attualmente selezionato è "${dipendenteAttivo}", diverso da quello nel file.`;
-  }
-
-  const mesiCoinvolti = [...new Set(record.map(r => r.meseAnno))];
-  const esistentiPerMese = await Promise.all(mesiCoinvolti.map(mese => getGiorniAttivitaDelMese(mese, dipendenteFile)));
-  const dateEsistenti = new Set(esistentiPerMese.flat().map(g => g.data));
-  const sovrapposizioni = record.filter(r => dateEsistenti.has(r.data)).length;
-  if (sovrapposizioni > 0) {
-    messaggio += `\n\nAttenzione: ${sovrapposizioni} di queste giornate esistono già e verrebbero duplicate.`;
-  }
-
-  const procedi = await chiediConferma(messaggio);
-  if (!procedi) return;
-
-  for (const r of record) {
-    const { id, ...senzaId } = r;
-    await salvaGiornoAttivita(senzaId);
-  }
-
-  alert(`Importazione completata: ${record.length} giornate aggiunte.`);
-  if (dipendenteFile === dipendenteAttivo) {
-    await aggiornaAttivita();
-  }
-}
 
 /* =========================================================
    ATTIVITÀ — form nuova giornata
@@ -2873,12 +2492,17 @@ async function salvaFormGiorno(e) {
   };
   if (stato.giornoInModifica) {
     record.id = stato.giornoInModifica.id;
+    record.syncId = stato.giornoInModifica.syncId || crypto.randomUUID();
+  } else {
+    record.syncId = crypto.randomUUID();
   }
+  record.syncStato = 'in_attesa';
 
-  await salvaGiornoAttivita(record);
+  record.id = await salvaGiornoAttivita(record);
 
   chiudiGiornoForm();
   await aggiornaAttivita();
+  sincronizzaRecord(RISORSA_ATTIVITA_GIORNI, record);
 }
 
 document.querySelectorAll('input[name="tipo-giorno"]').forEach(radio => {
@@ -2902,7 +2526,6 @@ el.selectDipendente.addEventListener('change', async () => {
 
 el.cardRimborso.addEventListener('click', apriRimborso);
 el.cardAttivita.addEventListener('click', apriAttivita);
-el.btnTornaHub.addEventListener('click', tornaAllHub);
 el.btnDatiFatturazione.addEventListener('click', apriFatturazione);
 el.btnTornaHubFatturazione.addEventListener('click', tornaAllHubDaFatturazione);
 
@@ -2913,12 +2536,6 @@ el.btnReopenMonthAttivita.addEventListener('click', riapriMeseAttivita);
 el.btnCloseMonthAttivita.addEventListener('click', chiudiMeseAttivita);
 el.btnAddGiorno.addEventListener('click', () => apriGiornoForm());
 el.btnApriAnagrafica.addEventListener('click', apriAnagrafica);
-el.btnImportaAttivita.addEventListener('click', () => el.inputImportaAttivita.click());
-el.inputImportaAttivita.addEventListener('change', async () => {
-  const file = el.inputImportaAttivita.files[0];
-  if (file) await importaAttivitaDaFile(file);
-  el.inputImportaAttivita.value = '';
-});
 el.btnExportAttivita.addEventListener('click', eseguiConGestioneErrori(async () => {
   const dipendente = localStorage.getItem('dipendenteAttivo');
   const giorni = await getGiorniAttivitaDelMese(stato.meseAttivoAttivita, dipendente);
@@ -3111,18 +2728,41 @@ function elencoEliminazioniPendenti() {
   }
 }
 
-function aggiungiEliminazionePendente(syncId) {
+// Quale endpoint usare per ciascun syncId in coda di eliminazione: senza questa
+// mappa, un tombstone di una ricevuta/giornata verrebbe ritentato sull'endpoint
+// delle spese, riceverebbe un 404 (record inesistente lì), e il tombstone
+// verrebbe rimosso come se l'eliminazione fosse riuscita — lasciando la riga
+// vera orfana sul server, mai più ritentata.
+function mappaPercorsiEliminazioniPendenti() {
+  try {
+    return JSON.parse(localStorage.getItem('sync_eliminazioni_percorso') || '{}');
+  } catch (e) {
+    return {};
+  }
+}
+
+function aggiungiEliminazionePendente(syncId, percorso = 'spese') {
   if (!syncId) return;
   const elenco = elencoEliminazioniPendenti();
   if (!elenco.includes(syncId)) {
     elenco.push(syncId);
     localStorage.setItem('sync_eliminazioni_pendenti', JSON.stringify(elenco));
   }
+  const mappa = mappaPercorsiEliminazioniPendenti();
+  if (mappa[syncId] !== percorso) {
+    mappa[syncId] = percorso;
+    localStorage.setItem('sync_eliminazioni_percorso', JSON.stringify(mappa));
+  }
 }
 
 function rimuoviEliminazionePendente(syncId) {
   const elenco = elencoEliminazioniPendenti().filter(id => id !== syncId);
   localStorage.setItem('sync_eliminazioni_pendenti', JSON.stringify(elenco));
+  const mappa = mappaPercorsiEliminazioniPendenti();
+  if (syncId in mappa) {
+    delete mappa[syncId];
+    localStorage.setItem('sync_eliminazioni_percorso', JSON.stringify(mappa));
+  }
 }
 
 function eliminaSpesaSulServer(syncId) {
@@ -3148,8 +2788,15 @@ async function eliminaSpesaSulServerInterno(syncId) {
 }
 
 async function sincronizzaEliminazioniPendenti() {
+  const mappa = mappaPercorsiEliminazioniPendenti();
   for (const syncId of elencoEliminazioniPendenti()) {
-    await eliminaSpesaSulServer(syncId);
+    const percorso = mappa[syncId] || 'spese';
+    if (percorso === 'spese') {
+      await eliminaSpesaSulServer(syncId);
+    } else {
+      const config = RISORSE_MOTORE_A.find(c => c.percorso === percorso);
+      if (config) await eliminaRecordSulServer(config, syncId);
+    }
   }
 }
 
@@ -3224,6 +2871,296 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* =========================================================
+   SINCRONIZZAZIONE GENERICA (Fase 2b) — stessa logica di `spese`
+   (coda seriale, tombstone, id catturato dopo il salvataggio), ma
+   parametrizzata per non ripetere 7 volte le stesse tre correzioni.
+   `spese` resta com'è sopra, già collaudata: non la tocco.
+   ========================================================= */
+
+const RISORSA_ATTIVITA_GIORNI = {
+  percorso: 'attivita-giorni',
+  campoImmagine: null,
+  campiTesto: ['meseAnno', 'data', 'tipoGiorno', 'righe', 'multiClienteNonRisolto'],
+  getDelMese: (mese) => getGiorniAttivitaDelMese(mese, localStorage.getItem('dipendenteAttivo')),
+  getTutti: () => getTuttiIGiorniAttivita(localStorage.getItem('dipendenteAttivo')),
+  aggiornaLocale: salvaGiornoAttivita, // store.put: fa già da upsert, non serve una funzione a parte
+  salvaLocale: salvaGiornoAttivita,
+  chiaveRisposta: 'giorni',
+  dipendenteLocale: true,
+  onNuoviDati: aggiornaAttivita,
+  serializzaExtra: (r) => ({ righe: JSON.stringify(r.righe || []), multiClienteNonRisolto: !!r.multiClienteNonRisolto }),
+  deserializzaExtra: (s) => ({ righe: JSON.parse(s.righe || '[]'), multiClienteNonRisolto: !!s.multiClienteNonRisolto })
+};
+
+const RISORSE_MOTORE_A = [RISORSA_ATTIVITA_GIORNI];
+
+async function sincronizzaRecordInterno(config, record) {
+  if (!record.syncId) return;
+  if (elencoEliminazioniPendenti().includes(record.syncId)) return;
+  try {
+    const token = await ottieniTokenSync();
+    if (!token) return;
+
+    const corpo = { id: record.syncId };
+    for (const campo of config.campiTesto) corpo[campo] = record[campo];
+    if (config.serializzaExtra) Object.assign(corpo, config.serializzaExtra(record));
+    if (config.campoImmagine) {
+      const blob = record[config.campoImmagine];
+      corpo[`${config.campoImmagine}Base64`] = blob ? (await blobToBase64(blob)).split(',')[1] : null;
+    }
+
+    const risposta = await fetch(`${AI_WORKER_URL}/${config.percorso}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify(corpo)
+    });
+
+    // Eliminata proprio mentre questa richiesta era in volo (vedi nota su `spese`).
+    if (elencoEliminazioniPendenti().includes(record.syncId)) {
+      if (risposta.ok) eliminaRecordSulServerInterno(config, record.syncId);
+      return;
+    }
+
+    if (risposta.ok) {
+      await config.aggiornaLocale({ ...record, syncStato: 'sincronizzata' });
+    } else {
+      const corpoErrore = await risposta.json().catch(() => ({}));
+      await config.aggiornaLocale({ ...record, syncStato: 'errore' });
+      await segnalaErroreSync(config.percorso, record.syncId, corpoErrore.errore || `HTTP ${risposta.status}`);
+    }
+  } catch (e) {
+    // Offline: resta "in_attesa", ritenterà al prossimo giro.
+  }
+}
+
+function sincronizzaRecord(config, record) {
+  return accodaSync(() => sincronizzaRecordInterno(config, record));
+}
+
+async function eliminaRecordSulServerInterno(config, syncId) {
+  try {
+    const token = await ottieniTokenSync();
+    if (!token) return;
+    const risposta = await fetch(`${AI_WORKER_URL}/${config.percorso}/${syncId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (risposta.ok || risposta.status === 404) rimuoviEliminazionePendente(syncId);
+  } catch (e) {
+    // Offline: resta in sospeso, ritenterà al prossimo giro online.
+  }
+}
+
+function eliminaRecordSulServer(config, syncId) {
+  if (!syncId) return;
+  aggiungiEliminazionePendente(syncId, config.percorso);
+  return accodaSync(() => eliminaRecordSulServerInterno(config, syncId));
+}
+
+async function scaricaRisorsaDalServerInterno(config, meseAnno) {
+  try {
+    const token = await ottieniTokenSync();
+    if (!token) return;
+    const risposta = await fetch(`${AI_WORKER_URL}/${config.percorso}?meseAnno=${encodeURIComponent(meseAnno)}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!risposta.ok) return;
+    const dati = await risposta.json();
+    const righeServer = dati[config.chiaveRisposta] || [];
+
+    const localiAttuali = await config.getDelMese(meseAnno);
+    const syncIdGiaPresenti = new Set(localiAttuali.map(r => r.syncId).filter(Boolean));
+    const syncIdInEliminazione = new Set(elencoEliminazioniPendenti());
+
+    let mancavaQualcosa = false;
+    for (const s of righeServer) {
+      if (syncIdGiaPresenti.has(s.id)) continue;
+      if (syncIdInEliminazione.has(s.id)) continue;
+
+      const record = {};
+      for (const campo of config.campiTesto) record[campo] = s[campo];
+      if (config.deserializzaExtra) Object.assign(record, config.deserializzaExtra(s));
+      if (config.campoImmagine) {
+        record[config.campoImmagine] = s[config.campoImmagine] ? base64ToBlob(`data:image/jpeg;base64,${s[config.campoImmagine]}`) : null;
+      }
+      if (config.dipendenteLocale) record.dipendente = localStorage.getItem('dipendenteAttivo');
+      record.syncId = s.id;
+      record.syncStato = 'sincronizzata';
+
+      await config.salvaLocale(record);
+      mancavaQualcosa = true;
+    }
+    if (mancavaQualcosa && config.onNuoviDati) await config.onNuoviDati();
+  } catch (e) {
+    // Offline: semplicemente non si scarica nulla di nuovo ora.
+  }
+}
+
+function scaricaRisorsaDalServer(config, meseAnno) {
+  return accodaSync(() => scaricaRisorsaDalServerInterno(config, meseAnno));
+}
+
+async function sincronizzaRisorsaPendenti(config) {
+  let tutte;
+  try {
+    tutte = await config.getTutti();
+  } catch (e) {
+    return;
+  }
+  for (const record of tutte) {
+    if (record.syncStato === 'sincronizzata') continue;
+    if (!record.syncId) {
+      record.syncId = crypto.randomUUID();
+      await config.aggiornaLocale(record);
+    }
+    await sincronizzaRecord(config, record);
+  }
+}
+
+function sincronizzaTuttePendenti() {
+  sincronizzaRisorsaPendenti(RISORSA_ATTIVITA_GIORNI);
+}
+
+window.addEventListener('online', sincronizzaTuttePendenti);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') sincronizzaTuttePendenti();
+});
+
+/* =========================================================
+   SINCRONIZZAZIONE — MOTORE B (Fase 2b): un profilo solo per
+   dipendente (firme, anagrafica attività). Niente coda/tombstone
+   qui: la chiave è già `dipendente_id`, basta un GET e un PUT.
+   Il pull non sovrascrive mai un dato locale già presente — con un
+   solo profilo per dipendente non c'è modo di sapere quale dei due
+   sia il più recente, quindi si scarica solo per "colmare" un
+   dispositivo nuovo, mai per sovrascrivere quello che c'è già.
+   ========================================================= */
+
+function sincronizzaFirma(dipendente, blob) {
+  return accodaSync(async () => {
+    try {
+      const token = await ottieniTokenSync();
+      if (!token) return;
+      const immagineBase64 = (await blobToBase64(blob)).split(',')[1];
+      await fetch(`${AI_WORKER_URL}/firme`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ immagineBase64 })
+      });
+    } catch (e) {
+      // Offline: resta solo in locale, ritenterà al prossimo salvataggio.
+    }
+  });
+}
+
+function scaricaFirmaSeMancante(dipendente) {
+  return accodaSync(async () => {
+    try {
+      const locale = await getFirma(dipendente);
+      if (locale) return;
+      const token = await ottieniTokenSync();
+      if (!token) return;
+      const risposta = await fetch(`${AI_WORKER_URL}/firme`, { headers: { 'Authorization': `Bearer ${token}` } });
+      if (!risposta.ok) return;
+      const { profilo } = await risposta.json();
+      if (!profilo || !profilo.immagine) return;
+      await salvaFirma(dipendente, base64ToBlob(`data:image/png;base64,${profilo.immagine}`));
+    } catch (e) {
+      // Offline: niente pull per ora.
+    }
+  });
+}
+
+function sincronizzaAnagraficaAttivita(record) {
+  return accodaSync(async () => {
+    try {
+      const token = await ottieniTokenSync();
+      if (!token) return;
+      await fetch(`${AI_WORKER_URL}/anagrafica-attivita`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          tc: record.tc,
+          orarioInizio: record.orarioInizio,
+          orarioFine: record.orarioFine,
+          clienti: JSON.stringify(record.clienti || [])
+        })
+      });
+    } catch (e) {
+      // Offline: resta solo in locale, ritenterà al prossimo salvataggio.
+    }
+  });
+}
+
+function scaricaAnagraficaSeMancante(dipendente) {
+  return accodaSync(async () => {
+    try {
+      const { store } = await txStore(STORE_ANAGRAFICA_ATTIVITA, 'readonly');
+      const locale = await reqAsPromise(store.get(dipendente));
+      if (locale) return;
+      const token = await ottieniTokenSync();
+      if (!token) return;
+      const risposta = await fetch(`${AI_WORKER_URL}/anagrafica-attivita`, { headers: { 'Authorization': `Bearer ${token}` } });
+      if (!risposta.ok) return;
+      const { profilo } = await risposta.json();
+      if (!profilo) return;
+      await salvaAnagraficaAttivita({
+        dipendente,
+        tc: profilo.tc,
+        orarioInizio: profilo.orarioInizio,
+        orarioFine: profilo.orarioFine,
+        clienti: JSON.parse(profilo.clienti || '[]')
+      });
+    } catch (e) {
+      // Offline: niente pull per ora.
+    }
+  });
+}
+
+/* =========================================================
+   SINCRONIZZAZIONE — MOTORE C (Fase 2b): stato aperto/chiuso di
+   un mese per dipendente, un booleano solo, niente coda/tombstone.
+   Qui, a differenza del Motore B, il server FA da riferimento: se
+   discorda dal locale (es. un mese riaperto da un altro
+   dispositivo) il locale viene aggiornato di conseguenza.
+   ========================================================= */
+
+function sincronizzaStatoMese(modulo, meseAnno, chiuso) {
+  return accodaSync(async () => {
+    try {
+      const token = await ottieniTokenSync();
+      if (!token) return;
+      await fetch(`${AI_WORKER_URL}/stato-mese/${modulo}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ meseAnno, chiuso })
+      });
+    } catch (e) {
+      // Offline: resta solo in locale, ritenterà al prossimo salvataggio.
+    }
+  });
+}
+
+function scaricaStatoMeseSeDiverso(modulo, meseAnno, chiusoLocale, setLocale, onCambiato) {
+  return accodaSync(async () => {
+    try {
+      const token = await ottieniTokenSync();
+      if (!token) return;
+      const risposta = await fetch(`${AI_WORKER_URL}/stato-mese/${modulo}?meseAnno=${encodeURIComponent(meseAnno)}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!risposta.ok) return;
+      const { chiuso } = await risposta.json();
+      if (chiuso === chiusoLocale) return;
+      await setLocale(meseAnno, chiuso);
+      if (onCambiato) await onCambiato();
+    } catch (e) {
+      // Offline: niente pull per ora.
+    }
+  });
+}
+
+/* =========================================================
    RIMBORSO
    ========================================================= */
 
@@ -3278,6 +3215,9 @@ async function aggiornaRimborso() {
   await aggiornaStatoFirma();
 
   scaricaSpeseDalServer(stato.meseAttivoRimborso); // in background, non blocca il render
+  const dipendenteAttivo = localStorage.getItem('dipendenteAttivo');
+  if (dipendenteAttivo) scaricaFirmaSeMancante(dipendenteAttivo);
+  scaricaStatoMeseSeDiverso('rimborso', stato.meseAttivoRimborso, chiuso, setStatoMeseRimborso, aggiornaRimborso);
 }
 
 function formattaDataSicura(data) {
@@ -3440,6 +3380,7 @@ async function chiudiMeseRimborso() {
   if (!conferma) return;
   await setStatoMeseRimborso(stato.meseAttivoRimborso, true);
   await aggiornaRimborso();
+  sincronizzaStatoMese('rimborso', stato.meseAttivoRimborso, true);
 }
 
 async function riapriMeseRimborso() {
@@ -3447,6 +3388,7 @@ async function riapriMeseRimborso() {
   if (!conferma) return;
   await setStatoMeseRimborso(stato.meseAttivoRimborso, false);
   await aggiornaRimborso();
+  sincronizzaStatoMese('rimborso', stato.meseAttivoRimborso, false);
 }
 
 /* =========================================================
@@ -3997,7 +3939,6 @@ async function apriFormSpesa(origine = 'rimborso', spesaEsistente = null) {
 
   await aggiornaListaEsercenti();
   el.viewRimborso.classList.add('hidden');
-  el.viewDashboard.classList.add('hidden');
   el.viewSpesaForm.classList.remove('hidden');
 }
 
@@ -4005,11 +3946,7 @@ function chiudiFormSpesa() {
   stato.spesaInModifica = null;
   stato.fotoSpesaCorrente = null;
   el.viewSpesaForm.classList.add('hidden');
-  if (stato.formSpesaOrigine === 'scontrini') {
-    el.viewDashboard.classList.remove('hidden');
-  } else {
-    el.viewRimborso.classList.remove('hidden');
-  }
+  el.viewRimborso.classList.remove('hidden');
 }
 
 async function salvaFormSpesa(e) {
@@ -4092,7 +4029,6 @@ el.btnCloseMonthRimborso.addEventListener('click', chiudiMeseRimborso);
 el.btnExportRimborso.addEventListener('click', eseguiConGestioneErrori(() => generaPdfRimborso(stato.meseAttivoRimborso), 'Esporta PDF Rimborso'));
 el.btnExportScontriniGenerico.addEventListener('click', eseguiConGestioneErrori(() => esportaScontriniDaSpese('generico', stato.meseAttivoRimborso), 'Esporta scontrini generico'));
 el.btnExportScontriniGasolio.addEventListener('click', eseguiConGestioneErrori(() => esportaScontriniDaSpese('gasolio', stato.meseAttivoRimborso), 'Esporta scontrini gasolio'));
-el.linkArchivioStorico.addEventListener('click', (e) => { e.preventDefault(); apriArchivioStorico(); });
 el.btnCaricaFirma.addEventListener('click', () => el.inputFirmaUpload.click());
 el.inputFirmaUpload.addEventListener('change', async () => {
   const file = el.inputFirmaUpload.files[0];
@@ -4288,8 +4224,6 @@ async function ripristinaDaTesto(testo) {
   }
 
   alert('Ripristino completato.');
-  stato.meseAttivo = await determinaMeseAttivoIniziale();
-  await aggiornaDashboard();
   stato.meseAttivoRimborso = await determinaMeseAttivoRimborsoIniziale();
   stato.meseAttivoAttivita = await determinaMeseAttivoAttivitaIniziale(localStorage.getItem('dipendenteAttivo'));
 }
@@ -4309,8 +4243,6 @@ el.inputImportaBackup.addEventListener('change', async () => {
 
 async function avvia() {
   inizializzaDipendente();
-  stato.meseAttivo = await determinaMeseAttivoIniziale();
-  await aggiornaDashboard();
   stato.meseAttivoRimborso = await determinaMeseAttivoRimborsoIniziale();
   stato.meseAttivoAttivita = await determinaMeseAttivoAttivitaIniziale(localStorage.getItem('dipendenteAttivo'));
 

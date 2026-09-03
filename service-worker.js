@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'scontrini-jb-cache-v43';
+const CACHE_NAME = 'scontrini-jb-cache-v44';
 const ASSETS = [
   './',
   './index.html',
@@ -37,8 +37,18 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Le chiamate al backend condiviso (login, sincronizzazione spese/ricevute/
+// attività/ecc.) non vanno MAI servite dalla cache: sono dati dinamici, non
+// asset statici. Senza questa esclusione, la prima GET verso un URL come
+// "/ricevute?meseAnno=2026-09" (magari con risposta ancora vuota) restava
+// fissata in cache per sempre, e l'app non vedeva più i dati nuovi scaricati
+// dal server per quello stesso URL — scoperto testando la Fase 2b: sembrava
+// un bug di sincronizzazione, era la cache del service worker.
+const ORIGINE_BACKEND = 'https://lb-gestionale-ai.arianuova.workers.dev';
+
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  if (event.request.url.startsWith(ORIGINE_BACKEND)) return;
 
   event.respondWith(
     caches.match(event.request).then((cached) => {
