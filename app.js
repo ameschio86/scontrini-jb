@@ -518,6 +518,8 @@ const el = {
   btnImportaBackup: document.getElementById('btn-importa-backup'),
   inputImportaBackup: document.getElementById('input-importa-backup'),
   btnDatiFatturazione: document.getElementById('btn-dati-fatturazione'),
+  btnSyncIn: document.getElementById('btn-sync-in'),
+  btnSyncOut: document.getElementById('btn-sync-out'),
   viewFatturazione: document.getElementById('view-fatturazione'),
   btnTornaHubFatturazione: document.getElementById('btn-torna-hub-fatturazione'),
   imgQrFatturazione: document.getElementById('img-qr-fatturazione'),
@@ -2752,20 +2754,23 @@ async function eliminaSpesaSulServerInterno(syncId, interattivo = true) {
   }
 }
 
-async function sincronizzaEliminazioniPendenti() {
+// `interattivo`: false quando chiamato dagli sweep automatici (avvio/online/
+// visibilitychange, mai il PIN), true quando chiamato dal pulsante manuale
+// "Sincronizza in uscita" (lì il PIN va bene, è un'azione esplicita).
+async function sincronizzaEliminazioniPendenti(interattivo = false) {
   const mappa = mappaPercorsiEliminazioniPendenti();
   for (const syncId of elencoEliminazioniPendenti()) {
     const percorso = mappa[syncId] || 'spese';
     if (percorso === 'spese') {
-      await eliminaSpesaSulServer(syncId, false); // sweep passivo: mai il PIN qui
+      await eliminaSpesaSulServer(syncId, interattivo);
     } else {
       const config = RISORSE_MOTORE_A.find(c => c.percorso === percorso);
-      if (config) await eliminaRecordSulServer(config, syncId, false);
+      if (config) await eliminaRecordSulServer(config, syncId, interattivo);
     }
   }
 }
 
-async function sincronizzaSpesePendenti() {
+async function sincronizzaSpesePendenti(interattivo = false) {
   let tutte;
   try {
     tutte = await getTutteLeSpese();
@@ -2778,17 +2783,19 @@ async function sincronizzaSpesePendenti() {
       spesa.syncId = crypto.randomUUID();
       await aggiornaSpesa(spesa);
     }
-    await sincronizzaSpesa(spesa, false); // sweep passivo (avvio/online/visibilitychange): mai il PIN qui
+    await sincronizzaSpesa(spesa, interattivo);
   }
 }
 
-function scaricaSpeseDalServer(meseAnno) {
-  return accodaSync(() => scaricaSpeseDalServerInterno(meseAnno));
+// `interattivo`: false per il pull automatico all'apertura di una schermata
+// (mai il PIN), true per il pulsante manuale "Sincronizza in entrata".
+function scaricaSpeseDalServer(meseAnno, interattivo = false) {
+  return accodaSync(() => scaricaSpeseDalServerInterno(meseAnno, interattivo));
 }
 
-async function scaricaSpeseDalServerInterno(meseAnno) {
+async function scaricaSpeseDalServerInterno(meseAnno, interattivo = false) {
   try {
-    const token = await ottieniTokenSync(false); // pull automatico all'apertura schermata: mai il PIN qui
+    const token = await ottieniTokenSync(interattivo);
     if (!token) return;
 
     const risposta = await fetchProtetto(`${AI_WORKER_URL}/spese?meseAnno=${encodeURIComponent(meseAnno)}`, {
@@ -2922,9 +2929,9 @@ function eliminaRecordSulServer(config, syncId, interattivo = true) {
   return accodaSync(() => eliminaRecordSulServerInterno(config, syncId, interattivo));
 }
 
-async function scaricaRisorsaDalServerInterno(config, meseAnno) {
+async function scaricaRisorsaDalServerInterno(config, meseAnno, interattivo = false) {
   try {
-    const token = await ottieniTokenSync(false); // pull automatico all'apertura schermata: mai il PIN qui
+    const token = await ottieniTokenSync(interattivo);
     if (!token) return;
     const risposta = await fetchProtetto(`${AI_WORKER_URL}/${config.percorso}?meseAnno=${encodeURIComponent(meseAnno)}`, {
       headers: { 'Authorization': `Bearer ${token}` }
@@ -2961,11 +2968,11 @@ async function scaricaRisorsaDalServerInterno(config, meseAnno) {
   }
 }
 
-function scaricaRisorsaDalServer(config, meseAnno) {
-  return accodaSync(() => scaricaRisorsaDalServerInterno(config, meseAnno));
+function scaricaRisorsaDalServer(config, meseAnno, interattivo = false) {
+  return accodaSync(() => scaricaRisorsaDalServerInterno(config, meseAnno, interattivo));
 }
 
-async function sincronizzaRisorsaPendenti(config) {
+async function sincronizzaRisorsaPendenti(config, interattivo = false) {
   let tutte;
   try {
     tutte = await config.getTutti();
@@ -2978,12 +2985,12 @@ async function sincronizzaRisorsaPendenti(config) {
       record.syncId = crypto.randomUUID();
       await config.aggiornaLocale(record);
     }
-    await sincronizzaRecord(config, record, false); // sweep passivo: mai il PIN qui
+    await sincronizzaRecord(config, record, interattivo);
   }
 }
 
-function sincronizzaTuttePendenti() {
-  sincronizzaRisorsaPendenti(RISORSA_ATTIVITA_GIORNI);
+function sincronizzaTuttePendenti(interattivo = false) {
+  return sincronizzaRisorsaPendenti(RISORSA_ATTIVITA_GIORNI, interattivo);
 }
 
 window.addEventListener('online', sincronizzaTuttePendenti);
@@ -3018,12 +3025,12 @@ function sincronizzaFirma(dipendente, blob) {
   });
 }
 
-function scaricaFirmaSeMancante(dipendente) {
+function scaricaFirmaSeMancante(dipendente, interattivo = false) {
   return accodaSync(async () => {
     try {
       const locale = await getFirma(dipendente);
       if (locale) return;
-      const token = await ottieniTokenSync(false); // pull automatico: mai il PIN qui
+      const token = await ottieniTokenSync(interattivo);
       if (!token) return;
       const risposta = await fetchProtetto(`${AI_WORKER_URL}/firme`, { headers: { 'Authorization': `Bearer ${token}` } });
       if (!risposta.ok) return;
@@ -3057,13 +3064,13 @@ function sincronizzaAnagraficaAttivita(record) {
   });
 }
 
-function scaricaAnagraficaSeMancante(dipendente) {
+function scaricaAnagraficaSeMancante(dipendente, interattivo = false) {
   return accodaSync(async () => {
     try {
       const { store } = await txStore(STORE_ANAGRAFICA_ATTIVITA, 'readonly');
       const locale = await reqAsPromise(store.get(dipendente));
       if (locale) return;
-      const token = await ottieniTokenSync(false); // pull automatico: mai il PIN qui
+      const token = await ottieniTokenSync(interattivo);
       if (!token) return;
       const risposta = await fetchProtetto(`${AI_WORKER_URL}/anagrafica-attivita`, { headers: { 'Authorization': `Bearer ${token}` } });
       if (!risposta.ok) return;
@@ -3106,10 +3113,10 @@ function sincronizzaStatoMese(modulo, meseAnno, chiuso) {
   });
 }
 
-function scaricaStatoMeseSeDiverso(modulo, meseAnno, chiusoLocale, setLocale, onCambiato) {
+function scaricaStatoMeseSeDiverso(modulo, meseAnno, chiusoLocale, setLocale, onCambiato, interattivo = false) {
   return accodaSync(async () => {
     try {
-      const token = await ottieniTokenSync(false); // pull automatico: mai il PIN qui
+      const token = await ottieniTokenSync(interattivo);
       if (!token) return;
       const risposta = await fetchProtetto(`${AI_WORKER_URL}/stato-mese/${modulo}?meseAnno=${encodeURIComponent(meseAnno)}`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -3123,6 +3130,42 @@ function scaricaStatoMeseSeDiverso(modulo, meseAnno, chiusoLocale, setLocale, on
       // Offline: niente pull per ora.
     }
   });
+}
+
+/* =========================================================
+   PULSANTI MANUALI "SINCRONIZZA IN ENTRATA/USCITA" (hub)
+   Le uniche due azioni, oltre a salvare/eliminare qualcosa, che possono far
+   comparire la richiesta del PIN: qui la persona sta esplicitamente
+   chiedendo di parlare col database, non solo aprendo o usando l'app.
+   ========================================================= */
+
+async function sincronizzaInUscita() {
+  const dipendente = localStorage.getItem('dipendenteAttivo');
+  if (!dipendente) {
+    alert('Seleziona prima un dipendente nell\'hub.');
+    return;
+  }
+  await sincronizzaSpesePendenti(true);
+  await sincronizzaEliminazioniPendenti(true);
+  await sincronizzaTuttePendenti(true);
+  alert('Sincronizzazione in uscita completata: i dati non ancora inviati sono stati spinti al database condiviso.');
+}
+
+async function sincronizzaInEntrata() {
+  const dipendente = localStorage.getItem('dipendenteAttivo');
+  if (!dipendente) {
+    alert('Seleziona prima un dipendente nell\'hub.');
+    return;
+  }
+  await scaricaSpeseDalServer(stato.meseAttivoRimborso, true);
+  await scaricaRisorsaDalServer(RISORSA_ATTIVITA_GIORNI, stato.meseAttivoAttivita, true);
+  await scaricaFirmaSeMancante(dipendente, true);
+  await scaricaAnagraficaSeMancante(dipendente, true);
+  const statoRimborso = await getStatoMeseRimborso(stato.meseAttivoRimborso);
+  await scaricaStatoMeseSeDiverso('rimborso', stato.meseAttivoRimborso, statoRimborso.chiuso, setStatoMeseRimborso, aggiornaRimborso, true);
+  const statoAttivita = await getStatoMeseAttivita(stato.meseAttivoAttivita);
+  await scaricaStatoMeseSeDiverso('attivita', stato.meseAttivoAttivita, statoAttivita.chiuso, setStatoMeseAttivita, aggiornaAttivita, true);
+  alert('Sincronizzazione in entrata completata: scaricati eventuali dati nuovi dal database condiviso.');
 }
 
 /* =========================================================
@@ -4200,6 +4243,8 @@ el.inputImportaBackup.addEventListener('change', async () => {
   if (file) await importaBackupCompleto(file);
   el.inputImportaBackup.value = '';
 });
+el.btnSyncIn.addEventListener('click', eseguiConGestioneErrori(sincronizzaInEntrata, 'Sincronizza in entrata'));
+el.btnSyncOut.addEventListener('click', eseguiConGestioneErrori(sincronizzaInUscita, 'Sincronizza in uscita'));
 
 /* =========================================================
    AVVIO APP
