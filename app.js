@@ -3786,15 +3786,71 @@ function haLavoratoIlGiorno(giorno) {
   return giorno.righe.some(r => r.cliente && r.cliente !== CLIENTE_PERMESSO);
 }
 
-function notaPresenzaGiorno(giorno) {
-  if (giorno.tipoGiorno === 'smart') return 'Smart working';
-  if (giorno.tipoGiorno !== 'normale') return giorno.righe[0].note;
+// Modulo PRESENZE a griglia (logo, MESE/ANNO, giorni 1-31 in colonna) — le
+// coordinate dell'intestazione (fissa, dentro presenze_base.pdf) sono state
+// misurate col rendering reale del modulo via pdfplumber, non a occhio.
+const PRESENZE_TEMPLATE = {
+  basePdfPath: 'templates/presenze_base.pdf',
+  pageHeight: 595.303937007874,
+  mese: { x: 220, top: 140.0 },
+  anno: { x: 450, top: 140.0 },
+  nomeDipendente: { x: 175, top: 162.5 },
+  giorni: { primoCentroX: 103.35, passo: 23.435 },
+  // La griglia dei giorni disegnata dall'app continua esattamente quella già
+  // stampata nel modulo (stesso bordo sinistro/destro della riga DATA) — ogni
+  // riga aggiunta ha tutte e 31 le caselle bordate, non solo i giorni con un
+  // dato: l'utente ha chiesto esplicitamente di non "cancellare" le celle
+  // vuote, solo di saltare le righe che non servono quel mese.
+  bordoSinistro: 22.8,
+  bordoDestro: 818.9,
+  primaRigaBordoSuperiore: 218.1, // = bordo inferiore della riga DATA nel modulo
+  altezzaRiga: 28,
+  offsetTestoInRiga: 16, // dal bordo superiore della cella al "top" del testo (come DATA)
+  margineSinistro: 26
+};
 
-  const orePermesso = orePermessoGiorno(giorno);
-  const parti = [];
-  if (haLavoratoIlGiorno(giorno)) parti.push('Lavorato');
-  if (orePermesso > 0) parti.push(`${orePermesso}h permesso`);
-  return parti.join(' + ') || 'Lavorato';
+// Ogni riga compare nel PDF SOLO se almeno un giorno del mese ha un valore
+// (su richiesta esplicita: niente righe fisse stampate vuote). Le righe
+// "checkbox" disegnano una casella ☐ su TUTTI i 31 giorni (spuntata solo dove
+// vera), come nel modulo originale; le righe "numero" disegnano la cifra solo
+// dove presente, senza casella. "Ore L.104" non c'è ancora: verrà aggiunta
+// quando si costruirà il campo apposito nel form giornate.
+const RIGHE_PRESENZE_DEF = [
+  { etichetta: 'PRESENTE', tipo: 'checkbox', valore: (g) => haLavoratoIlGiorno(g) },
+  { etichetta: 'ORE PERMESSO', tipo: 'numero', valore: (g) => orePermessoGiorno(g) },
+  { etichetta: 'FERIE', tipo: 'checkbox', valore: (g) => g.tipoGiorno === 'ferie' },
+  { etichetta: 'MALATTIA', tipo: 'checkbox', valore: (g) => g.tipoGiorno === 'malattia' },
+  { etichetta: 'INFORTUNIO', tipo: 'checkbox', valore: (g) => g.tipoGiorno === 'infortunio' },
+  { etichetta: 'PERMESSO RETRIB. UNIVERSITÀ', tipo: 'checkbox', valore: (g) => g.tipoGiorno === 'permesso_universita' },
+  { etichetta: 'ASPETTATIVA NON RETRIBUITA', tipo: 'checkbox', valore: (g) => g.tipoGiorno === 'aspettativa' },
+  { etichetta: 'CORSO', tipo: 'checkbox', valore: (g) => g.tipoGiorno === 'corso' }
+];
+
+// Colore di sfondo della colonna etichette (grigio del modulo originale,
+// misurato via pdfplumber sul PDF di esempio: rgb 0.686/0.671/0.671).
+const GRIGIO_COLONNA_ETICHETTE = [0.6862745098, 0.6705882352, 0.6705882352];
+
+// Divide un'etichetta su più righe in modo che ciascuna stia entro
+// `larghezzaMax`, per non uscire dalla cella (a capo, non tagliata).
+function suddividiTestoPerLarghezza(testo, font, dimensione, larghezzaMax) {
+  const parole = testo.split(' ');
+  const righe = [];
+  let rigaCorrente = '';
+  for (const parola of parole) {
+    const prova = rigaCorrente ? rigaCorrente + ' ' + parola : parola;
+    if (rigaCorrente && font.widthOfTextAtSize(prova, dimensione) > larghezzaMax) {
+      righe.push(rigaCorrente);
+      rigaCorrente = parola;
+    } else {
+      rigaCorrente = prova;
+    }
+  }
+  if (rigaCorrente) righe.push(rigaCorrente);
+  return righe;
+}
+
+function presenzePdfLibY(top, altezza) {
+  return PRESENZE_TEMPLATE.pageHeight - top - altezza;
 }
 
 async function generaPdfPresenze(meseAnno) {
@@ -3802,66 +3858,131 @@ async function generaPdfPresenze(meseAnno) {
   const giorni = await getGiorniAttivitaDelMese(meseAnno, dipendente);
   if (giorni.length === 0) return;
 
-  const righePresenza = giorni.map(g => ({ data: g.data, note: notaPresenzaGiorno(g) }));
-
-  const giorniLavorativi = giorni.filter(haLavoratoIlGiorno).length;
-  const giorniFerie = giorni.filter(g => g.tipoGiorno === 'ferie').length;
-  const orePermessoTotali = giorni.reduce((tot, g) => tot + (g.tipoGiorno === 'normale' ? orePermessoGiorno(g) : 0), 0);
-
-  righePresenza.push({ data: null, note: `TOTALE GIORNI LAVORATIVI: ${giorniLavorativi}` });
-  if (giorniFerie > 0) righePresenza.push({ data: null, note: `TOTALE GIORNI FERIE: ${giorniFerie}` });
-  if (orePermessoTotali > 0) righePresenza.push({ data: null, note: `TOTALE ORE PERMESSO: ${orePermessoTotali}` });
-
-  const capienzaTotale = ATTIVITA_TEMPLATE.righePerPagina * ATTIVITA_TEMPLATE.numPagine;
-  if (righePresenza.length > capienzaTotale) {
-    alert('Il report presenze ha più righe di quelle disponibili sul modulo. Contattami per gestire questo caso.');
-    return;
-  }
-
-  const anagrafica = await getAnagraficaAttivita(dipendente);
-  const tc = (anagrafica.tc || '').toUpperCase();
+  const giorniConNumero = giorni.map(g => ({ ...g, numeroGiorno: parseDataISO(g.data).getDate() }));
 
   const { PDFDocument, StandardFonts, rgb } = PDFLib;
-  const baseBytes = await caricaBytes(ATTIVITA_TEMPLATE.basePdfPath);
+  const baseBytes = await caricaBytes(PRESENZE_TEMPLATE.basePdfPath);
   const doc = await PDFDocument.load(baseBytes);
   const font = await doc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
   const nero = rgb(0, 0, 0);
-  const DIM = 8;
+  const page = doc.getPage(0);
+  const DIM = 9;
 
-  function scriviRigaPresenza(page, top, riga) {
-    const c = ATTIVITA_TEMPLATE.colonne;
-    const y = pdfLibY(top, DIM);
+  const { mese, anno } = scomponiMeseAnno(meseAnno);
+  page.drawText(MESI_IT[mese - 1], { x: PRESENZE_TEMPLATE.mese.x, y: presenzePdfLibY(PRESENZE_TEMPLATE.mese.top, DIM), size: DIM, font, color: nero });
+  page.drawText(String(anno), { x: PRESENZE_TEMPLATE.anno.x, y: presenzePdfLibY(PRESENZE_TEMPLATE.anno.top, DIM), size: DIM, font, color: nero });
 
-    if (riga.data) {
-      page.drawText(tc, { x: centraTestoInColonna(font, tc, DIM, c.TC), y, size: DIM, font, color: nero });
-      const dataFormattata = parseDataISO(riga.data).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' });
-      page.drawText(dataFormattata, { x: centraTestoInColonna(font, dataFormattata, DIM, c.DATA), y, size: DIM, font, color: nero });
-    }
-
-    if (riga.note) {
-      const DIM_NOTE = 6;
-      const larghezzaNote = c.NOTE[1] - c.NOTE[0] - 6;
-      const righeNote = suddividiTestoInRighe(font, riga.note, DIM_NOTE, larghezzaNote).slice(0, 2);
-      const passo = DIM_NOTE + 1;
-      const offsetCentratura = righeNote.length > 1 ? passo / 2 : 0;
-      righeNote.forEach((rn, i) => {
-        page.drawText(rn, { x: c.NOTE[0] + 3, y: y + offsetCentratura - i * passo, size: DIM_NOTE, font, color: nero });
-      });
-    }
+  const cognomeNome = dipendente ? invertiNomeCognome(dipendente) : '';
+  if (cognomeNome) {
+    page.drawText(cognomeNome, { x: PRESENZE_TEMPLATE.nomeDipendente.x, y: presenzePdfLibY(PRESENZE_TEMPLATE.nomeDipendente.top, DIM), size: DIM, font: fontBold, color: nero });
   }
 
-  const numPagineNecessarie = Math.max(1, Math.ceil(righePresenza.length / ATTIVITA_TEMPLATE.righePerPagina));
-  for (let p = 0; p < numPagineNecessarie; p++) {
-    const page = doc.getPage(p);
-    const cp = ATTIVITA_TEMPLATE.campoPagina;
-    page.drawText(String(p + 1), { x: cp.numX, y: pdfLibY(cp.top, DIM), size: DIM, font, color: nero });
-    page.drawText(String(numPagineNecessarie), { x: cp.totX, y: pdfLibY(cp.top, DIM), size: DIM, font, color: nero });
-
-    const righePagina = righePresenza.slice(p * ATTIVITA_TEMPLATE.righePerPagina, (p + 1) * ATTIVITA_TEMPLATE.righePerPagina);
-    righePagina.forEach((riga, i) => scriviRigaPresenza(page, ATTIVITA_TEMPLATE.righeTop[i], riga));
+  function xGiorno(numeroGiorno) {
+    return PRESENZE_TEMPLATE.giorni.primoCentroX + (numeroGiorno - 1) * PRESENZE_TEMPLATE.giorni.passo;
   }
-  for (let p = ATTIVITA_TEMPLATE.numPagine - 1; p >= numPagineNecessarie; p--) {
-    doc.removePage(p);
+  // Confini di colonna (32 linee per 31 celle): n=1 è il bordo sinistro del
+  // giorno 1, n=32 il bordo destro del giorno 31 — stessa griglia già
+  // stampata staticamente sotto la riga DATA nel modulo.
+  function xBordoGiorno(n) {
+    return PRESENZE_TEMPLATE.giorni.primoCentroX - PRESENZE_TEMPLATE.giorni.passo / 2 + (n - 1) * PRESENZE_TEMPLATE.giorni.passo;
+  }
+
+  const xInizioGiorni = xBordoGiorno(1); // confine tra colonna etichette e giorno 1
+  const larghezzaColonnaEtichette = xInizioGiorni - PRESENZE_TEMPLATE.bordoSinistro;
+  const dimEtichetta = 7;
+  const interlineaEtichetta = dimEtichetta + 2;
+  const paddingEtichetta = 3;
+
+  let numRigheDisegnate = 0;
+  for (const def of RIGHE_PRESENZE_DEF) {
+    const valoriDelMese = giorniConNumero
+      .map(g => ({ numeroGiorno: g.numeroGiorno, valore: def.valore(g) }))
+      .filter(v => v.valore === true || (typeof v.valore === 'number' && v.valore > 0));
+    if (valoriDelMese.length === 0) continue; // nessun giorno di questo tipo: riga saltata
+    const mappaValori = new Map(valoriDelMese.map(v => [v.numeroGiorno, v.valore]));
+
+    const cellaTop = PRESENZE_TEMPLATE.primaRigaBordoSuperiore + numRigheDisegnate * PRESENZE_TEMPLATE.altezzaRiga;
+    const cellaBottom = cellaTop + PRESENZE_TEMPLATE.altezzaRiga;
+    const yBordoSup = presenzePdfLibY(cellaTop, 0);
+    const yBordoInf = presenzePdfLibY(cellaBottom, 0);
+    const yCentroRiga = presenzePdfLibY(cellaTop + PRESENZE_TEMPLATE.altezzaRiga / 2, 0);
+    const y = presenzePdfLibY(cellaTop + PRESENZE_TEMPLATE.offsetTestoInRiga, DIM);
+
+    // Sfondo grigio della colonna etichette (come nel modulo originale),
+    // disegnato PRIMA della griglia/testo così restano sopra.
+    page.drawRectangle({
+      x: PRESENZE_TEMPLATE.bordoSinistro, y: yBordoInf,
+      width: larghezzaColonnaEtichette, height: PRESENZE_TEMPLATE.altezzaRiga,
+      color: rgb(...GRIGIO_COLONNA_ETICHETTE)
+    });
+
+    // Riga intera con tutte le caselle bordate (come nel modulo), non solo i
+    // giorni con un dato: bordo esterno + una linea verticale per ogni
+    // confine di colonna, da 1 a 31.
+    page.drawLine({ start: { x: PRESENZE_TEMPLATE.bordoSinistro, y: yBordoSup }, end: { x: PRESENZE_TEMPLATE.bordoDestro, y: yBordoSup }, thickness: 0.6, color: nero });
+    page.drawLine({ start: { x: PRESENZE_TEMPLATE.bordoSinistro, y: yBordoInf }, end: { x: PRESENZE_TEMPLATE.bordoDestro, y: yBordoInf }, thickness: 0.6, color: nero });
+    page.drawLine({ start: { x: PRESENZE_TEMPLATE.bordoSinistro, y: yBordoSup }, end: { x: PRESENZE_TEMPLATE.bordoSinistro, y: yBordoInf }, thickness: 0.6, color: nero });
+    page.drawLine({ start: { x: PRESENZE_TEMPLATE.bordoDestro, y: yBordoSup }, end: { x: PRESENZE_TEMPLATE.bordoDestro, y: yBordoInf }, thickness: 0.6, color: nero });
+    for (let n = 1; n <= 32; n++) {
+      page.drawLine({ start: { x: xBordoGiorno(n), y: yBordoSup }, end: { x: xBordoGiorno(n), y: yBordoInf }, thickness: 0.4, color: nero });
+    }
+
+    // Etichetta: testo a capo (non esce mai dalla cella) e centrato in
+    // verticale nella riga, non ancorato al bordo superiore.
+    const righeEtichetta = suddividiTestoPerLarghezza(def.etichetta, fontBold, dimEtichetta, larghezzaColonnaEtichette - paddingEtichetta * 2);
+    const altezzaBloccoEtichetta = righeEtichetta.length * interlineaEtichetta;
+    const topBloccoEtichetta = cellaTop + (PRESENZE_TEMPLATE.altezzaRiga - altezzaBloccoEtichetta) / 2;
+    righeEtichetta.forEach((riga, i) => {
+      const larghezzaRiga = fontBold.widthOfTextAtSize(riga, dimEtichetta);
+      const xRiga = PRESENZE_TEMPLATE.bordoSinistro + (larghezzaColonnaEtichette - larghezzaRiga) / 2;
+      const topRiga = topBloccoEtichetta + i * interlineaEtichetta;
+      page.drawText(riga, { x: xRiga, y: presenzePdfLibY(topRiga, dimEtichetta), size: dimEtichetta, font: fontBold, color: nero });
+    });
+
+    if (def.tipo === 'checkbox') {
+      // Una casella ☐ su tutti i 31 giorni (spuntata solo dove vera), come
+      // nel modulo originale — non solo sui giorni con un dato.
+      const lato = 6.5, meta = lato / 2;
+      for (let numeroGiorno = 1; numeroGiorno <= 31; numeroGiorno++) {
+        const cx = xGiorno(numeroGiorno);
+        page.drawRectangle({ x: cx - meta, y: yCentroRiga - meta, width: lato, height: lato, borderColor: nero, borderWidth: 0.6 });
+        if (mappaValori.get(numeroGiorno) === true) {
+          page.drawLine({ start: { x: cx - meta + 1.2, y: yCentroRiga + 0.3 }, end: { x: cx - 0.6, y: yCentroRiga - meta + 1.3 }, thickness: 1, color: nero });
+          page.drawLine({ start: { x: cx - 0.6, y: yCentroRiga - meta + 1.3 }, end: { x: cx + meta - 1, y: yCentroRiga + meta - 1 }, thickness: 1, color: nero });
+        }
+      }
+    } else {
+      for (const [numeroGiorno, valore] of mappaValori) {
+        const cx = xGiorno(numeroGiorno);
+        const testo = String(valore);
+        const larghezzaTesto = font.widthOfTextAtSize(testo, DIM - 1);
+        page.drawText(testo, { x: cx - larghezzaTesto / 2, y, size: DIM - 1, font, color: nero });
+      }
+    }
+    numRigheDisegnate++;
+  }
+
+  const topFirma = PRESENZE_TEMPLATE.primaRigaBordoSuperiore + numRigheDisegnate * PRESENZE_TEMPLATE.altezzaRiga + 20;
+  const testoFirma = 'Firma ';
+  page.drawText(testoFirma, { x: PRESENZE_TEMPLATE.margineSinistro, y: presenzePdfLibY(topFirma, DIM), size: DIM, font, color: nero });
+  page.drawLine({
+    start: { x: PRESENZE_TEMPLATE.margineSinistro + font.widthOfTextAtSize(testoFirma, DIM), y: presenzePdfLibY(topFirma, DIM) },
+    end: { x: PRESENZE_TEMPLATE.margineSinistro + 260, y: presenzePdfLibY(topFirma, DIM) },
+    thickness: 0.7, color: nero
+  });
+
+  const firmaBlob = await getFirma(dipendente);
+  if (firmaBlob) {
+    const firmaBytes = await firmaBlob.arrayBuffer();
+    const firmaImg = await doc.embedPng(firmaBytes);
+    const larghezzaFirma = 90, altezzaFirma = 34;
+    page.drawImage(firmaImg, {
+      x: PRESENZE_TEMPLATE.margineSinistro + font.widthOfTextAtSize(testoFirma, DIM) + 10,
+      y: presenzePdfLibY(topFirma - 3, altezzaFirma),
+      width: larghezzaFirma,
+      height: altezzaFirma
+    });
   }
 
   const pdfBytes = await doc.save();

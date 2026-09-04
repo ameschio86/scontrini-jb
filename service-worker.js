@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'scontrini-jb-cache-v47';
+const CACHE_NAME = 'scontrini-jb-cache-v49';
 const ASSETS = [
   './',
   './index.html',
@@ -13,6 +13,7 @@ const ASSETS = [
   './icons/qr-fatturazione.png',
   './templates/rimborso_spese_base.pdf',
   './templates/report_attivita_base.pdf',
+  './templates/presenze_base.pdf',
   'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js'
 ];
