@@ -160,6 +160,7 @@
       <button id="btn-export-rimborso" class="btn-export">Esporta PDF Rimborso — mese attivo</button>
       <button id="btn-export-scontrini-generico" class="btn-export">Esporta scontrini generico — mese attivo</button>
       <button id="btn-export-scontrini-gasolio" class="btn-export">Esporta scontrini gasolio — mese attivo</button>
+      <button id="btn-export-scontrini-personale" class="btn-export hidden">Esporta scontrini personali — mese attivo</button>
     </div>
 
     <button id="btn-close-month-rimborso" class="btn-close-month">Chiudi mese</button>
@@ -190,6 +191,7 @@
         <legend>Categoria</legend>
         <label class="radio-label"><input type="radio" name="categoria-spesa" value="generico" checked> 📷 Generico</label>
         <label class="radio-label"><input type="radio" name="categoria-spesa" value="gasolio"> ⛽ Gasolio</label>
+        <label class="radio-label hidden" id="opzione-categoria-personale"><input type="radio" name="categoria-spesa" value="personale"> 🔒 Personale</label>
       </fieldset>
 
       <label class="campo-label">Data

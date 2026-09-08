@@ -69,7 +69,7 @@ function nomeFileExport(categoria, meseAnno) {
   const nomeMese = MESI_IT[mese - 1];
   const dipendente = localStorage.getItem('dipendenteAttivo');
   const cognomeNome = dipendente ? invertiNomeCognome(dipendente) : 'Dipendente non impostato';
-  const tipo = categoria === 'gasolio' ? 'Rimborso gasolio' : 'Rimborso scontrini';
+  const tipo = categoria === 'gasolio' ? 'Rimborso gasolio' : categoria === 'personale' ? 'Rimborso personale' : 'Rimborso scontrini';
   return `${dataOdiernaCompatta()} - ${tipo} ${nomeMese} - ${cognomeNome}.pdf`;
 }
 
@@ -544,6 +544,8 @@ const el = {
   totaleDipendente: document.getElementById('totale-dipendente'),
   btnExportScontriniGenerico: document.getElementById('btn-export-scontrini-generico'),
   btnExportScontriniGasolio: document.getElementById('btn-export-scontrini-gasolio'),
+  btnExportScontriniPersonale: document.getElementById('btn-export-scontrini-personale'),
+  opzioneCategoriaPersonale: document.getElementById('opzione-categoria-personale'),
 
   viewSpesaForm: document.getElementById('view-spesa-form'),
   formSpesa: document.getElementById('form-spesa'),
@@ -1081,7 +1083,7 @@ async function esportaScontriniDaSpese(categoria, meseAnno) {
   await esportaFotoBooklet(
     spese.map(s => s.immagine),
     nomeFileExport(categoria, meseAnno),
-    `Nessuno scontrino ${categoria === 'gasolio' ? 'gasolio' : ''} da esportare per ${etichettaMese(meseAnno)}.`
+    `Nessuno scontrino ${categoria === 'gasolio' ? 'gasolio' : categoria === 'personale' ? 'personale' : ''} da esportare per ${etichettaMese(meseAnno)}.`
   );
 }
 
@@ -1106,6 +1108,22 @@ el.btnRifinisciConferma.addEventListener('click', confermaRifinisci);
 function inizializzaDipendente() {
   const salvato = localStorage.getItem('dipendenteAttivo');
   if (salvato) el.selectDipendente.value = salvato;
+  aggiornaVisibilitaSpesePersonali();
+}
+
+// Le spese "Personale" sono visibili solo a chi le usa davvero (su richiesta
+// esplicita): per tutti gli altri dipendenti il controllo resta nascosto,
+// esattamente come prima di questa funzione.
+const DIPENDENTI_SPESE_PERSONALI = ['Sebastiano Lovison', 'Paolo Benà', 'Alessandro Meschiari'];
+
+function puoUsareSpesePersonali(dipendente) {
+  return DIPENDENTI_SPESE_PERSONALI.includes(dipendente);
+}
+
+function aggiornaVisibilitaSpesePersonali() {
+  const abilitato = puoUsareSpesePersonali(localStorage.getItem('dipendenteAttivo'));
+  el.opzioneCategoriaPersonale.classList.toggle('hidden', !abilitato);
+  el.btnExportScontriniPersonale.classList.toggle('hidden', !abilitato);
 }
 
 function apriFatturazione() {
@@ -1818,7 +1836,8 @@ function applicaDatiScontrinoAlForm(risultato) {
 }
 
 function impostaCategoriaSpesa(categoria) {
-  const radio = document.querySelector(`input[name="categoria-spesa"][value="${categoria === 'gasolio' ? 'gasolio' : 'generico'}"]`);
+  const valore = categoria === 'gasolio' ? 'gasolio' : categoria === 'personale' ? 'personale' : 'generico';
+  const radio = document.querySelector(`input[name="categoria-spesa"][value="${valore}"]`);
   if (radio) radio.checked = true;
 }
 
@@ -2432,6 +2451,7 @@ document.querySelectorAll('input[name="tipo-giorno"]').forEach(radio => {
 el.selectDipendente.addEventListener('change', async () => {
   localStorage.setItem('dipendenteAttivo', el.selectDipendente.value);
   stato.meseAttivoAttivita = await determinaMeseAttivoAttivitaIniziale(el.selectDipendente.value);
+  aggiornaVisibilitaSpesePersonali();
 });
 
 el.cardRimborso.addEventListener('click', apriRimborso);
@@ -3185,6 +3205,7 @@ function etichettaPagamento(pagamento) {
 async function apriRimborso() {
   el.viewHub.classList.add('hidden');
   el.viewRimborso.classList.remove('hidden');
+  aggiornaVisibilitaSpesePersonali();
   await aggiornaRimborso();
 }
 
@@ -3486,32 +3507,72 @@ function nomeFileExportRimborso(meseAnno) {
   return `${dataOdiernaCompatta()} - Rimborso spese ${nomeMese} - ${cognomeNome}.pdf`;
 }
 
-async function generaPdfRimborso(meseAnno) {
-  const spese = await getSpeseDelMese(meseAnno);
-  if (spese.length === 0) {
-    alert(`Nessuna spesa da esportare per ${etichettaMese(meseAnno)}.`);
-    return;
-  }
+function nomeFileExportRimborsoPersonale(meseAnno) {
+  const { mese } = scomponiMeseAnno(meseAnno);
+  const nomeMese = MESI_IT[mese - 1];
+  const dipendente = localStorage.getItem('dipendenteAttivo');
+  const cognomeNome = dipendente ? invertiNomeCognome(dipendente) : 'Dipendente non impostato';
+  return `${dataOdiernaCompatta()} - Rimborso personale ${nomeMese} - ${cognomeNome}.pdf`;
+}
 
-  const capienzaP1 = RIMBORSO_TEMPLATE.righePagina1.length;
-  const capienzaP2 = RIMBORSO_TEMPLATE.righePagina2.length;
-  if (spese.length > capienzaP1 + capienzaP2) {
-    alert(`Questo mese ha ${spese.length} spese, più delle ${capienzaP1 + capienzaP2} righe disponibili sul modulo (2 pagine). Elimina o sposta qualche voce prima di esportare: la gestione di una terza pagina non è ancora disponibile.`);
-    return;
-  }
+function scaricaPdf(pdfBytes, nomeFile) {
+  const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nomeFile;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
+// Costruisce il PDF Rimborso (stesso modulo aziendale) per un elenco di
+// spese qualsiasi — usato sia per il foglio generale sia, quando ci sono
+// spese Personale, per il foglio separato che le riporta da sole. Oltre le
+// 27 righe (15 pagina 1 + 12 pagina 2) aggiunge automaticamente altre
+// pagine "in stile pagina 2" duplicando quella del modulo: i totali e la
+// firma restano sempre e solo sull'ultima pagina, le pagine intermedie
+// hanno quella zona coperta (altrimenti mostrerebbero un totale/firma non
+// veri, essendo una copia grafica della pagina finale del modulo).
+async function costruisciPdfRimborso(spese, meseAnno, dipendenteAttivo) {
   const { PDFDocument, StandardFonts, rgb } = PDFLib;
-  const dipendenteAttivo = localStorage.getItem('dipendenteAttivo');
 
   const baseBytes = await caricaBytes(RIMBORSO_TEMPLATE.basePdfPath);
   const doc = await PDFDocument.load(baseBytes);
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
   const nero = rgb(0, 0, 0);
+  const bianco = rgb(1, 1, 1);
   const DIM = 8;
 
-  const pagina1 = doc.getPage(0);
-  const pagina2 = doc.getPage(1);
+  const capienzaP1 = RIMBORSO_TEMPLATE.righePagina1.length;
+  const capienzaP2 = RIMBORSO_TEMPLATE.righePagina2.length;
+
+  const righeOltrePagina1 = Math.max(0, spese.length - capienzaP1);
+  const paginheContinuazioneTotali = Math.max(1, Math.ceil(righeOltrePagina1 / capienzaP2));
+  const paginheExtraDaCreare = paginheContinuazioneTotali - 1;
+
+  // L'indice della pagina "finale" del modulo (quella con totali/firma) si
+  // sposta di uno ad ogni inserimento, perché ogni nuova pagina va infilata
+  // subito prima di essa.
+  let indiceFinaleTemplate = 1;
+  for (let i = 0; i < paginheExtraDaCreare; i++) {
+    const [copia] = await doc.copyPages(doc, [indiceFinaleTemplate]);
+    doc.insertPage(1 + i, copia);
+    indiceFinaleTemplate++;
+  }
+
+  const pagine = doc.getPages();
+  const pagina1 = pagine[0];
+  const pagineContinuazione = pagine.slice(1); // l'ultima e' sempre quella con totali/firma
+  const paginaFinale = pagineContinuazione[pagineContinuazione.length - 1];
+  const totalePagine = 1 + paginheContinuazioneTotali;
+
+  // Le pagine di continuazione intermedie (non l'ultima) sono copie grafiche
+  // della pagina finale: coprono la zona totali/attestazione/firma con un
+  // rettangolo bianco, perche' su quella pagina la lista continua ancora.
+  pagineContinuazione.slice(0, -1).forEach(pagina => {
+    pagina.drawRectangle({ x: 21, y: RIMBORSO_TEMPLATE.pageHeight - 520, width: 800, height: 121, color: bianco });
+  });
 
   const { anno, mese } = scomponiMeseAnno(meseAnno);
   const nomeMese = MESI_IT[mese - 1].toUpperCase();
@@ -3522,7 +3583,7 @@ async function generaPdfRimborso(meseAnno) {
     page.drawText(nomeMese, { x: cf.mese.x, y: pdfLibY(cf.mese.top), size: DIM, font, color: nero });
     page.drawText(String(anno), { x: cf.anno.x, y: pdfLibY(cf.anno.top), size: DIM, font, color: nero });
     page.drawText(String(numeroPagina), { x: cf.paginaNum.x, y: pdfLibY(cf.paginaNum.top), size: DIM, font, color: nero });
-    page.drawText('2', { x: cf.paginaTot.x, y: pdfLibY(cf.paginaTot.top), size: DIM, font, color: nero });
+    page.drawText(String(totalePagine), { x: cf.paginaTot.x, y: pdfLibY(cf.paginaTot.top), size: DIM, font, color: nero });
     if (cognomeNome) {
       page.drawText(cognomeNome, { x: cf.nomeIncarico.x, y: pdfLibY(cf.nomeIncarico.top), size: DIM, font: fontBold, color: nero });
     }
@@ -3563,12 +3624,17 @@ async function generaPdfRimborso(meseAnno) {
   }
 
   scriviCampiFissi(pagina1, 1);
-  scriviCampiFissi(pagina2, 2);
+  pagineContinuazione.forEach((pagina, i) => scriviCampiFissi(pagina, i + 2));
 
   const spesePagina1 = spese.slice(0, capienzaP1);
-  const spesePagina2 = spese.slice(capienzaP1);
   spesePagina1.forEach((s, i) => scriviRiga(pagina1, RIMBORSO_TEMPLATE.righePagina1[i], s));
-  spesePagina2.forEach((s, i) => scriviRiga(pagina2, RIMBORSO_TEMPLATE.righePagina2[i], s));
+
+  let cursore = capienzaP1;
+  pagineContinuazione.forEach(pagina => {
+    const fetta = spese.slice(cursore, cursore + capienzaP2);
+    fetta.forEach((s, i) => scriviRiga(pagina, RIMBORSO_TEMPLATE.righePagina2[i], s));
+    cursore += capienzaP2;
+  });
 
   let totaleCarta = 0, totaleOggettoRimborso = 0;
   for (const s of spese) {
@@ -3577,19 +3643,19 @@ async function generaPdfRimborso(meseAnno) {
   }
 
   const testoTotCarta = formatoImporto(totaleCarta);
-  pagina2.drawText(testoTotCarta, {
+  paginaFinale.drawText(testoTotCarta, {
     x: allineaADestraInColonna(font, testoTotCarta, DIM, RIMBORSO_TEMPLATE.colonne.IMPORTO_CARTA),
     y: pdfLibY(RIMBORSO_TEMPLATE.totali.totCarta.top), size: DIM, font, color: nero
   });
 
   const testoTotOggetto = formatoImporto(totaleOggettoRimborso);
-  pagina2.drawText(testoTotOggetto, {
+  paginaFinale.drawText(testoTotOggetto, {
     x: allineaADestraInColonna(font, testoTotOggetto, DIM, RIMBORSO_TEMPLATE.colonne.IMPORTO_DIPENDENTE),
     y: pdfLibY(RIMBORSO_TEMPLATE.totali.totOggettoRimborso.top), size: DIM, font, color: nero
   });
 
   if (cognomeNome) {
-    pagina2.drawText(cognomeNome, {
+    paginaFinale.drawText(cognomeNome, {
       x: RIMBORSO_TEMPLATE.attestazione.nome.x, y: pdfLibY(RIMBORSO_TEMPLATE.attestazione.nome.top), size: DIM, font: fontBold, color: nero
     });
   }
@@ -3599,7 +3665,7 @@ async function generaPdfRimborso(meseAnno) {
     const firmaBytes = await firmaBlob.arrayBuffer();
     const firmaImg = await doc.embedPng(firmaBytes);
     const f = RIMBORSO_TEMPLATE.attestazione.firma;
-    pagina2.drawImage(firmaImg, {
+    paginaFinale.drawImage(firmaImg, {
       x: f.x,
       y: RIMBORSO_TEMPLATE.pageHeight - f.top - f.height,
       width: f.width,
@@ -3607,14 +3673,29 @@ async function generaPdfRimborso(meseAnno) {
     });
   }
 
-  const pdfBytes = await doc.save();
-  const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = nomeFileExportRimborso(meseAnno);
-  a.click();
-  URL.revokeObjectURL(url);
+  return doc.save();
+}
+
+async function generaPdfRimborso(meseAnno) {
+  const spese = await getSpeseDelMese(meseAnno);
+  if (spese.length === 0) {
+    alert(`Nessuna spesa da esportare per ${etichettaMese(meseAnno)}.`);
+    return;
+  }
+
+  const dipendenteAttivo = localStorage.getItem('dipendenteAttivo');
+
+  const pdfGenerale = await costruisciPdfRimborso(spese, meseAnno, dipendenteAttivo);
+  scaricaPdf(pdfGenerale, nomeFileExportRimborso(meseAnno));
+
+  // Le spese Personale restano anche nel foglio generale sopra (nessun
+  // filtro): in piu', se ce ne sono, generano un secondo file a parte con
+  // solo quelle, stesso modulo, per poterle distinguere facilmente.
+  const spesePersonali = spese.filter(s => s.categoria === 'personale');
+  if (spesePersonali.length > 0) {
+    const pdfPersonale = await costruisciPdfRimborso(spesePersonali, meseAnno, dipendenteAttivo);
+    scaricaPdf(pdfPersonale, nomeFileExportRimborsoPersonale(meseAnno));
+  }
 }
 
 /* =========================================================
@@ -4038,6 +4119,7 @@ async function apriFormSpesa(origine = 'rimborso', spesaEsistente = null) {
   stato.spesaInModifica = spesaEsistente;
   el.formSpesa.reset();
   pulisciEvidenziazioneForm(el.formSpesa);
+  aggiornaVisibilitaSpesePersonali();
 
   el.titoloSpesaForm.textContent = spesaEsistente ? 'Modifica spesa' : 'Nuova spesa';
   el.btnSalvaSpesa.textContent = spesaEsistente ? 'Salva modifiche' : 'Salva spesa';
@@ -4158,6 +4240,7 @@ el.btnCloseMonthRimborso.addEventListener('click', chiudiMeseRimborso);
 el.btnExportRimborso.addEventListener('click', eseguiConGestioneErrori(() => generaPdfRimborso(stato.meseAttivoRimborso), 'Esporta PDF Rimborso'));
 el.btnExportScontriniGenerico.addEventListener('click', eseguiConGestioneErrori(() => esportaScontriniDaSpese('generico', stato.meseAttivoRimborso), 'Esporta scontrini generico'));
 el.btnExportScontriniGasolio.addEventListener('click', eseguiConGestioneErrori(() => esportaScontriniDaSpese('gasolio', stato.meseAttivoRimborso), 'Esporta scontrini gasolio'));
+el.btnExportScontriniPersonale.addEventListener('click', eseguiConGestioneErrori(() => esportaScontriniDaSpese('personale', stato.meseAttivoRimborso), 'Esporta scontrini personali'));
 el.btnCaricaFirma.addEventListener('click', () => el.inputFirmaUpload.click());
 el.inputFirmaUpload.addEventListener('change', async () => {
   const file = el.inputFirmaUpload.files[0];
