@@ -18,6 +18,58 @@ const CLIENTE_PERMESSO = '__PERMESSO__';
 const MAX_LATO_LUNGO = 2200;
 const JPEG_QUALITY = 0.85;
 
+// Elenco clienti/cantieri unico per tutti i dipendenti (commesse attive,
+// fornito dal titolare) — non più modificabile dal singolo dipendente
+// nell'anagrafica: per aggiungerne uno nuovo si aggiorna questa lista e si
+// pusha. "L&B Sede" non ha un codice commessa (non è una commessa vera).
+const CANTIERI_ATTIVI = [
+  { codice: '243', cliente: 'NUOVA CARLET', cantiere: 'DEPURATORE_FERRARA' },
+  { codice: '242', cliente: 'ATI BRUSSI_ZARA', cantiere: 'PONTE SUL FIUME GORZONE' },
+  { codice: '241', cliente: 'ATI GPR_AVIANESE_BELLOMO', cantiere: 'A4 SVINCOLO REDIPUGLIA/MONFALCONE NORD' },
+  { codice: '240', cliente: 'ATI BRUSSI_ADRIASTRADE_ECOVIE', cantiere: "A4 TERZA CORSIA SAN DONA' - PORTOGRUARO" },
+  { codice: '239', cliente: 'ATI BRUSSI_ECOVIE_ZARA', cantiere: 'AIPO - PISTA CICLABILE MANTOVA' },
+  { codice: '238', cliente: 'ANESE SRL', cantiere: 'SAN GIULIANO - VENEZIA' },
+  { codice: '237', cliente: 'BRUSSI COSTRUZIONI SRL', cantiere: 'AUTAMAROCCHI VIA OLANDA PADOVA' },
+  { codice: '236', cliente: 'GHIAIE PONTE ROSSO', cantiere: 'ROTATORIA PERTEGADA' },
+  { codice: '235', cliente: 'COMUNE DI S.MICHELE AL T.', cantiere: 'PISTA CICLABILE VIA BASELEGHE - BIBIONE' },
+  { codice: '234', cliente: 'COMUNE DI S.MICHELE AL T.', cantiere: 'PISTA LIDO DEI PINI - BIBIONE' },
+  { codice: '233', cliente: 'BRUSSI COSTRUZIONI SRL', cantiere: 'PONTE BIANCO E VERDE - TRIESTE' },
+  { codice: '232', cliente: 'VITTADELLO', cantiere: 'TRAM PADOVA LOTTO 2' },
+  { codice: '229', cliente: 'ATI GPR_ZARA_IPOGEO', cantiere: 'CICLOVIA TS-LS LOTTO 1B' },
+  { codice: '228', cliente: 'BRUSSI COSTRUZIONI SRL', cantiere: 'CONSORZIO RENANA' },
+  { codice: '227', cliente: 'ANESE SRL', cantiere: 'PORTO VIRO' },
+  { codice: '226', cliente: 'ANESE SRL', cantiere: 'MONSELICE' },
+  { codice: '225', cliente: 'BRUSSI COSTRUZIONI SRL', cantiere: 'ELETTRIFICAZIONE BANCHINA FUSINA - VENEZIA' },
+  { codice: '223', cliente: 'PADANA ESCAVAZIONI INERTI', cantiere: 'CAVE SABBIA FERRARA' },
+  { codice: '221', cliente: 'BRUSSI COSTRUZIONI SRL', cantiere: 'TERRAGLIO EST' },
+  { codice: '220', cliente: 'BRUSSI COSTRUZIONI SRL', cantiere: 'BACINO LUSORE' },
+  { codice: '216', cliente: 'BRUSSI COSTRUZIONI SRL', cantiere: 'TREVISO - VIA CESARE BATTISTI' },
+  { codice: '214', cliente: 'BRUSSI COSTRUZIONI SRL', cantiere: 'PONTE SUL TORRENTE MUSON IN COMUNE DI CASTELFRANCO' },
+  { codice: '212', cliente: 'COGE RENOVATION', cantiere: 'CASERMETTA 9' },
+  { codice: '210', cliente: 'BRUSSI COSTRUZIONI SRL', cantiere: 'MARGHERA VIA DELLA CHIMICA' },
+  { codice: '209', cliente: 'BRUSSI COSTRUZIONI SRL', cantiere: 'CICLOVIA 21' },
+  { codice: '203', cliente: 'ATI BRUSSI - ADRIASTRADE', cantiere: 'PIAZZALI ADS FRATTA NORD E SUD - A4' },
+  { codice: '196', cliente: 'COGE RENOVATION', cantiere: 'FORTEZZA MARGHERA - RECUPERO MUSEALE CASERMETTA 8' },
+  { codice: '', cliente: 'L&B Sede', cantiere: 'L&B Sede' }
+];
+
+// Trasforma l'elenco piatto sopra nella stessa forma {nome, sottoclienti:
+// [{codice, cantieri}]} già usata da tutto il resto del codice, cosi' non
+// serve toccare il resto della logica (popolaSelectClienti/Cantieri, AI,
+// ecc.) — un blocco per riga: ogni commessa ha il suo codice dedicato.
+function costruisciClientiCondivisi() {
+  const clienti = [];
+  for (const r of CANTIERI_ATTIVI) {
+    let cliente = clienti.find(c => c.nome === r.cliente);
+    if (!cliente) {
+      cliente = { nome: r.cliente, sottoclienti: [] };
+      clienti.push(cliente);
+    }
+    cliente.sottoclienti.push({ codice: r.codice, cantieri: [r.cantiere] });
+  }
+  return clienti;
+}
+
 const MESI_IT = [
   'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
   'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'
@@ -270,7 +322,22 @@ async function getAnagraficaAttivita(dipendente) {
   if (!dipendente) return null;
   const { store } = await txStore(STORE_ANAGRAFICA_ATTIVITA, 'readonly');
   const result = await reqAsPromise(store.get(dipendente));
-  return result || { dipendente, tc: suggerisciSiglaTC(dipendente), orarioInizio: '08:00', orarioFine: '17:00', clienti: [] };
+  const anagrafica = result || { dipendente, tc: suggerisciSiglaTC(dipendente), orarioInizio: '08:00', orarioFine: '17:00', clienti: [] };
+  // L'elenco clienti/cantieri e' condiviso e gestito centralmente (vedi
+  // CANTIERI_ATTIVI): qui sovrascriviamo sempre il campo "clienti" letto dal
+  // dipendente con quello condiviso, cosi' ogni punto del codice che legge
+  // stato.anagraficaCorrente.clienti vede automaticamente la lista corretta
+  // senza doverla toccare in ogni punto di chiamata. Il valore salvato in
+  // precedenza per ciascun dipendente resta intatto nel database (non lo
+  // sovrascriviamo mai su disco), solo non viene piu' usato.
+  anagrafica.clienti = costruisciClientiCondivisi();
+  if (!anagrafica.modalitaPercentuale) anagrafica.modalitaPercentuale = 'cliente';
+  return anagrafica;
+}
+
+async function getAnagraficaGrezza(dipendente) {
+  const { store } = await txStore(STORE_ANAGRAFICA_ATTIVITA, 'readonly');
+  return reqAsPromise(store.get(dipendente));
 }
 
 async function salvaAnagraficaAttivita(record) {
@@ -440,7 +507,6 @@ const stato = {
   angoloTrascinato: null,
   meseAttivoRimborso: meseAnnoCorrente(),
   meseAttivoAttivita: meseAnnoCorrente(),
-  anagraficaClienti: [],
   anagraficaCorrente: null,
   tappeCounter: 0,
   giornoInModifica: null,
@@ -481,8 +547,6 @@ const el = {
   inputTC: document.getElementById('input-tc'),
   inputOrarioInizio: document.getElementById('input-orario-inizio'),
   inputOrarioFine: document.getElementById('input-orario-fine'),
-  listaClientiAnagrafica: document.getElementById('lista-clienti-anagrafica'),
-  btnAggiungiCliente: document.getElementById('btn-aggiungi-cliente'),
   btnSalvaAnagrafica: document.getElementById('btn-salva-anagrafica'),
 
   viewGiornoForm: document.getElementById('view-giorno-form'),
@@ -495,6 +559,8 @@ const el = {
   inputMalattiaNote: document.getElementById('input-malattia-note'),
   bloccoInfortunio: document.getElementById('blocco-infortunio'),
   inputInfortunioNote: document.getElementById('input-infortunio-note'),
+  bloccoL104: document.getElementById('blocco-l104'),
+  inputL104Note: document.getElementById('input-l104-note'),
   bloccoCorso: document.getElementById('blocco-corso'),
   inputCorsoNote: document.getElementById('input-corso-note'),
   bloccoPermessoUniversita: document.getElementById('blocco-permesso-universita'),
@@ -1201,6 +1267,7 @@ function renderListaGiorniAttivita(giorni, meseChiuso) {
     const etichettaTipo = g.tipoGiorno === 'ferie' ? 'Ferie'
       : g.tipoGiorno === 'malattia' ? 'Malattia'
       : g.tipoGiorno === 'infortunio' ? 'Infortunio'
+      : g.tipoGiorno === 'l104' ? 'L.104'
       : g.tipoGiorno === 'corso' ? 'Corso'
       : g.tipoGiorno === 'permesso_universita' ? 'Permesso Università'
       : g.tipoGiorno === 'aspettativa' ? 'Aspettativa non retribuita'
@@ -1329,11 +1396,11 @@ async function apriAnagrafica() {
     return;
   }
   const anagrafica = await getAnagraficaAttivita(dipendente);
-  stato.anagraficaClienti = JSON.parse(JSON.stringify(anagrafica.clienti || []));
   el.inputTC.value = anagrafica.tc || suggerisciSiglaTC(dipendente);
   el.inputOrarioInizio.value = anagrafica.orarioInizio || '08:00';
   el.inputOrarioFine.value = anagrafica.orarioFine || '17:00';
-  renderAnagraficaClienti();
+  const radioModalita = document.querySelector(`input[name="modalita-percentuale"][value="${anagrafica.modalitaPercentuale}"]`);
+  if (radioModalita) radioModalita.checked = true;
   scaricaAnagraficaSeMancante(dipendente); // in background: se manca in locale, la prossima apertura la troverà
 
   el.viewAttivita.classList.add('hidden');
@@ -1345,109 +1412,24 @@ function chiudiAnagrafica() {
   el.viewAttivita.classList.remove('hidden');
 }
 
-function renderAnagraficaClienti() {
-  el.listaClientiAnagrafica.innerHTML = '';
-
-  stato.anagraficaClienti.forEach((cliente, ci) => {
-    const div = document.createElement('div');
-    div.className = 'anagrafica-cliente';
-
-    const inputNome = document.createElement('input');
-    inputNome.className = 'anagrafica-cliente-nome';
-    inputNome.type = 'text';
-    inputNome.placeholder = 'Nome cliente (es. PEI)';
-    inputNome.value = cliente.nome;
-    inputNome.addEventListener('input', () => { cliente.nome = inputNome.value; });
-    div.appendChild(inputNome);
-
-    const subContainer = document.createElement('div');
-    subContainer.className = 'anagrafica-sottoclienti';
-
-    cliente.sottoclienti.forEach((sc, si) => {
-      const subDiv = document.createElement('div');
-      subDiv.className = 'anagrafica-sottocliente';
-
-      const inputCodice = document.createElement('input');
-      inputCodice.type = 'text';
-      inputCodice.placeholder = 'Codice (es. P.223)';
-      inputCodice.value = sc.codice;
-      inputCodice.addEventListener('input', () => { sc.codice = inputCodice.value; });
-
-      const inputCantieri = document.createElement('input');
-      inputCantieri.type = 'text';
-      inputCantieri.placeholder = 'Cantieri tipici, separati da virgola';
-      inputCantieri.value = sc.cantieri.join(', ');
-      inputCantieri.addEventListener('input', () => {
-        sc.cantieri = inputCantieri.value.split(',').map(s => s.trim()).filter(Boolean);
-      });
-
-      const rigaAzioni = document.createElement('div');
-      rigaAzioni.className = 'anagrafica-riga-azioni';
-      const btnRimuoviSub = document.createElement('button');
-      btnRimuoviSub.type = 'button';
-      btnRimuoviSub.className = 'btn-rimuovi-mini';
-      btnRimuoviSub.textContent = '✕ Rimuovi codice';
-      btnRimuoviSub.addEventListener('click', () => {
-        cliente.sottoclienti.splice(si, 1);
-        renderAnagraficaClienti();
-      });
-      rigaAzioni.appendChild(btnRimuoviSub);
-
-      subDiv.appendChild(inputCodice);
-      subDiv.appendChild(inputCantieri);
-      subDiv.appendChild(rigaAzioni);
-      subContainer.appendChild(subDiv);
-    });
-    div.appendChild(subContainer);
-
-    const azioniCliente = document.createElement('div');
-    azioniCliente.className = 'anagrafica-cliente-azioni';
-
-    const btnAggiungiSub = document.createElement('button');
-    btnAggiungiSub.type = 'button';
-    btnAggiungiSub.className = 'btn-testo-mini';
-    btnAggiungiSub.textContent = '+ Aggiungi codice';
-    btnAggiungiSub.addEventListener('click', () => {
-      cliente.sottoclienti.push({ codice: '', cantieri: [] });
-      renderAnagraficaClienti();
-    });
-
-    const btnRimuoviCliente = document.createElement('button');
-    btnRimuoviCliente.type = 'button';
-    btnRimuoviCliente.className = 'btn-rimuovi-mini';
-    btnRimuoviCliente.textContent = '🗑 Elimina cliente';
-    btnRimuoviCliente.addEventListener('click', () => {
-      stato.anagraficaClienti.splice(ci, 1);
-      renderAnagraficaClienti();
-    });
-
-    azioniCliente.appendChild(btnAggiungiSub);
-    azioniCliente.appendChild(btnRimuoviCliente);
-    div.appendChild(azioniCliente);
-
-    el.listaClientiAnagrafica.appendChild(div);
-  });
-}
-
 async function salvaAnagraficaDaForm() {
   const dipendente = localStorage.getItem('dipendenteAttivo');
   if (!dipendente) return;
 
-  const clientiPuliti = stato.anagraficaClienti
-    .filter(c => c.nome.trim())
-    .map(c => ({
-      nome: c.nome.trim(),
-      sottoclienti: c.sottoclienti
-        .filter(sc => sc.codice.trim())
-        .map(sc => ({ codice: sc.codice.trim(), cantieri: sc.cantieri }))
-    }));
+  const radioModalita = document.querySelector('input[name="modalita-percentuale"]:checked');
+  // L'elenco clienti/cantieri non si tocca mai da qui (e' condiviso, vedi
+  // CANTIERI_ATTIVI): leggiamo il record grezzo, non quello di
+  // getAnagraficaAttivita che lo sovrascrive sempre in lettura, cosi' il
+  // valore salvato in precedenza per questo dipendente resta intatto.
+  const precedente = await getAnagraficaGrezza(dipendente);
 
   const record = {
     dipendente,
     tc: (el.inputTC.value || '').trim().toUpperCase(),
     orarioInizio: el.inputOrarioInizio.value || '08:00',
     orarioFine: el.inputOrarioFine.value || '17:00',
-    clienti: clientiPuliti
+    modalitaPercentuale: radioModalita ? radioModalita.value : 'cliente',
+    clienti: (precedente && precedente.clienti) || []
   };
   await salvaAnagraficaAttivita(record);
   sincronizzaAnagraficaAttivita(record);
@@ -1552,7 +1534,7 @@ function applicaTappaAI(div, tappa) {
 }
 
 function applicaRisultatoAI(risultato) {
-  const tipiValidi = ['normale', 'ferie', 'malattia', 'infortunio', 'corso', 'permesso_universita', 'aspettativa', 'smart'];
+  const tipiValidi = ['normale', 'ferie', 'malattia', 'infortunio', 'l104', 'permesso_universita', 'aspettativa'];
   if (!tipiValidi.includes(risultato.tipoGiorno)) return false;
 
   const radio = document.querySelector(`input[name="tipo-giorno"][value="${risultato.tipoGiorno}"]`);
@@ -1565,18 +1547,12 @@ function applicaRisultatoAI(risultato) {
     el.inputMalattiaNote.value = risultato.note || '';
   } else if (risultato.tipoGiorno === 'infortunio') {
     el.inputInfortunioNote.value = risultato.note || '';
-  } else if (risultato.tipoGiorno === 'corso') {
-    el.inputCorsoNote.value = risultato.note || '';
+  } else if (risultato.tipoGiorno === 'l104') {
+    el.inputL104Note.value = risultato.note || '';
   } else if (risultato.tipoGiorno === 'permesso_universita') {
     el.inputPermessoUniversitaNote.value = risultato.note || '';
   } else if (risultato.tipoGiorno === 'aspettativa') {
     el.inputAspettativaNote.value = risultato.note || '';
-  } else if (risultato.tipoGiorno === 'smart') {
-    const tappa = (risultato.tappe || [])[0];
-    if (tappa) {
-      el.selectSmartCliente.value = tappa.cliente || '';
-      el.inputSmartNote.value = tappa.note || '';
-    }
   } else {
     el.listaTappe.innerHTML = '';
     stato.tappeCounter = 0;
@@ -1931,6 +1907,7 @@ async function apriGiornoForm(giornoEsistente = null) {
   el.bloccoFerie.classList.add('hidden');
   el.bloccoMalattia.classList.add('hidden');
   el.bloccoInfortunio.classList.add('hidden');
+  el.bloccoL104.classList.add('hidden');
   el.bloccoCorso.classList.add('hidden');
   el.bloccoPermessoUniversita.classList.add('hidden');
   el.bloccoAspettativa.classList.add('hidden');
@@ -1940,14 +1917,6 @@ async function apriGiornoForm(giornoEsistente = null) {
   el.listaTappe.innerHTML = '';
 
   stato.anagraficaCorrente = await getAnagraficaAttivita(dipendente);
-
-  if (!giornoEsistente && stato.anagraficaCorrente.clienti.length === 0) {
-    const vaiAnagrafica = await chiediConferma('Non hai ancora nessun cliente in anagrafica. Vuoi aggiungerlo ora?');
-    if (vaiAnagrafica) {
-      await apriAnagrafica();
-      return;
-    }
-  }
 
   popolaSelectClienti(el.selectSmartCliente);
   stato.tappeCounter = 0;
@@ -1966,6 +1935,8 @@ async function apriGiornoForm(giornoEsistente = null) {
       el.inputMalattiaNote.value = estraiNoteSemplice(primaRiga.note, 'MALATTIA');
     } else if (giornoEsistente.tipoGiorno === 'infortunio') {
       el.inputInfortunioNote.value = estraiNoteSemplice(primaRiga.note, 'INFORTUNIO');
+    } else if (giornoEsistente.tipoGiorno === 'l104') {
+      el.inputL104Note.value = estraiNoteSemplice(primaRiga.note, 'L104');
     } else if (giornoEsistente.tipoGiorno === 'corso') {
       el.inputCorsoNote.value = estraiNoteSemplice(primaRiga.note, 'CORSO');
     } else if (giornoEsistente.tipoGiorno === 'permesso_universita') {
@@ -2011,12 +1982,16 @@ function aggiornaAvvisoMultiCliente() {
 }
 
 function aggiornaOrariTappe() {
+  const modalita = (stato.anagraficaCorrente && stato.anagraficaCorrente.modalitaPercentuale) || 'cliente';
   const divs = [...el.listaTappe.children];
   divs.forEach((div, i) => {
     const selectCliente = div.querySelector('.tappa-cliente');
     const clienteAttuale = selectCliente.value;
+    const cantiereAttuale = div.querySelector('.tappa-cantiere').value;
     const ePermesso = clienteAttuale === CLIENTE_PERMESSO;
-    const clientePrecedente = i > 0 ? divs[i - 1].querySelector('.tappa-cliente').value : null;
+    const divPrecedente = i > 0 ? divs[i - 1] : null;
+    const clientePrecedente = divPrecedente ? divPrecedente.querySelector('.tappa-cliente').value : null;
+    const cantierePrecedente = divPrecedente ? divPrecedente.querySelector('.tappa-cantiere').value : null;
     const precedenteEPermesso = clientePrecedente === CLIENTE_PERMESSO;
 
     const labelCodice = div.querySelector('.tappa-codice-label');
@@ -2047,7 +2022,9 @@ function aggiornaOrariTappe() {
       inputPermessoInizio.value = '';
       inputPermessoFine.value = '';
 
-      const eSwitch = i > 0 && !precedenteEPermesso && clienteAttuale && clientePrecedente && clienteAttuale !== clientePrecedente;
+      const chiaveAttuale = chiaveBlocco({ cliente: clienteAttuale, cantiere: cantiereAttuale }, modalita);
+      const chiavePrecedente = divPrecedente ? chiaveBlocco({ cliente: clientePrecedente, cantiere: cantierePrecedente }, modalita) : null;
+      const eSwitch = i > 0 && !precedenteEPermesso && clienteAttuale && clientePrecedente && chiaveAttuale !== chiavePrecedente;
       labelOrario.classList.toggle('hidden', !eSwitch);
       if (!eSwitch) inputOrario.value = '';
     }
@@ -2230,14 +2207,26 @@ function popolaTappaDaRiga(div, riga) {
   inputPermessoFine.value = riga.orarioFinePermesso || '';
 }
 
-function raggruppaInBlocchi(righe) {
+// Chiave di raggruppamento delle tappe in blocchi per il calcolo delle
+// percentuali: un permesso e' sempre un blocco a se'; per il resto, in
+// modalita "cliente" (default, comportamento di sempre) si raggruppa solo
+// per cliente, in modalita "cantiere" anche per cantiere — cosi' chi lavora
+// piu' cantieri dello stesso cliente nella stessa giornata ottiene una
+// percentuale per ciascun cantiere invece che una sola per il cliente.
+function chiaveBlocco(riga, modalitaPercentuale) {
+  if (riga.cliente === CLIENTE_PERMESSO) return CLIENTE_PERMESSO;
+  return modalitaPercentuale === 'cantiere' ? `${riga.cliente}|||${riga.cantiere}` : riga.cliente;
+}
+
+function raggruppaInBlocchi(righe, modalitaPercentuale) {
   const blocchi = [];
   for (const r of righe) {
+    const chiave = chiaveBlocco(r, modalitaPercentuale);
     const ultimo = blocchi[blocchi.length - 1];
-    if (ultimo && ultimo.cliente === r.cliente) {
+    if (ultimo && ultimo.chiave === chiave) {
       ultimo.righe.push(r);
     } else {
-      blocchi.push({ cliente: r.cliente, righe: [r] });
+      blocchi.push({ cliente: r.cliente, chiave, righe: [r] });
     }
   }
   return blocchi;
@@ -2323,17 +2312,17 @@ function calcolaPercentualiBlocchi(blocchi, orarioInizio, orarioFine) {
   return true;
 }
 
-function unisciPercentualiClientiRipetuti(blocchi) {
-  const primaRigaPerCliente = new Map();
+function unisciPercentualiRipetuti(blocchi) {
+  const primaRigaPerChiave = new Map();
   for (const blocco of blocchi) {
     const rigaConPercentuale = blocco.righe[blocco.righe.length - 1];
     if (rigaConPercentuale.percentuale === null) continue;
-    const ancora = primaRigaPerCliente.get(blocco.cliente);
+    const ancora = primaRigaPerChiave.get(blocco.chiave);
     if (ancora) {
       ancora.percentuale += rigaConPercentuale.percentuale;
       rigaConPercentuale.percentuale = null;
     } else {
-      primaRigaPerCliente.set(blocco.cliente, rigaConPercentuale);
+      primaRigaPerChiave.set(blocco.chiave, rigaConPercentuale);
     }
   }
 }
@@ -2353,26 +2342,27 @@ async function salvaFormGiorno(e) {
     righe = [{ cliente: '', codice: '', cantiere: '', note: luogo ? `FERIE - ${luogo}` : 'FERIE', percentuale: null }];
   } else if (tipoGiorno === 'malattia') {
     const nota = el.inputMalattiaNote.value.trim();
-    righe = [{ cliente: '', codice: '', cantiere: '', note: nota ? `MALATTIA - ${nota}` : 'MALATTIA', percentuale: null }];
+    if (!nota) {
+      alert('Inserisci il codice certificato: è obbligatorio per la Malattia.');
+      return;
+    }
+    righe = [{ cliente: '', codice: '', cantiere: '', note: `MALATTIA - ${nota}`, percentuale: null }];
   } else if (tipoGiorno === 'infortunio') {
     const nota = el.inputInfortunioNote.value.trim();
-    righe = [{ cliente: '', codice: '', cantiere: '', note: nota ? `INFORTUNIO - ${nota}` : 'INFORTUNIO', percentuale: null }];
-  } else if (tipoGiorno === 'corso') {
-    const nota = el.inputCorsoNote.value.trim();
-    righe = [{ cliente: '', codice: '', cantiere: '', note: nota ? `CORSO - ${nota}` : 'CORSO', percentuale: null }];
+    if (!nota) {
+      alert('Inserisci il codice certificato: è obbligatorio per l\'Infortunio.');
+      return;
+    }
+    righe = [{ cliente: '', codice: '', cantiere: '', note: `INFORTUNIO - ${nota}`, percentuale: null }];
+  } else if (tipoGiorno === 'l104') {
+    const nota = el.inputL104Note.value.trim();
+    righe = [{ cliente: '', codice: '', cantiere: '', note: nota ? `L104 - ${nota}` : 'L104', percentuale: null }];
   } else if (tipoGiorno === 'permesso_universita') {
     const nota = el.inputPermessoUniversitaNote.value.trim();
     righe = [{ cliente: '', codice: '', cantiere: '', note: nota ? `PERMESSO_UNIVERSITA - ${nota}` : 'PERMESSO_UNIVERSITA', percentuale: null }];
   } else if (tipoGiorno === 'aspettativa') {
     const nota = el.inputAspettativaNote.value.trim();
     righe = [{ cliente: '', codice: '', cantiere: '', note: nota ? `ASPETTATIVA - ${nota}` : 'ASPETTATIVA', percentuale: null }];
-  } else if (tipoGiorno === 'smart') {
-    const cliente = el.selectSmartCliente.value;
-    if (!cliente) {
-      alert('Seleziona il cliente per cui stai lavorando in smart working.');
-      return;
-    }
-    righe = [{ cliente, codice: '', cantiere: 'Smart working', note: el.inputSmartNote.value.trim(), percentuale: 100 }];
   } else {
     const blocchi = [...el.listaTappe.children];
     if (blocchi.length === 0) {
@@ -2395,14 +2385,15 @@ async function salvaFormGiorno(e) {
       return;
     }
 
-    const blocchiCliente = raggruppaInBlocchi(righe);
+    const modalitaPercentuale = stato.anagraficaCorrente.modalitaPercentuale || 'cliente';
+    const blocchiCliente = raggruppaInBlocchi(righe, modalitaPercentuale);
     if (blocchiCliente.length === 1) {
       righe[righe.length - 1].percentuale = 100;
       percentualiRisolte = true;
     } else {
       percentualiRisolte = calcolaPercentualiBlocchi(blocchiCliente, stato.anagraficaCorrente.orarioInizio, stato.anagraficaCorrente.orarioFine);
       if (percentualiRisolte) {
-        unisciPercentualiClientiRipetuti(blocchiCliente);
+        unisciPercentualiRipetuti(blocchiCliente);
       } else {
         alert('Non riesco a calcolare le percentuali: controlla di aver indicato l\'orario di switch per ogni cambio cliente, in ordine crescente e compreso nell\'orario di lavoro standard. Salvo comunque la giornata, ma dovrai completare le percentuali in seguito.');
       }
@@ -2440,6 +2431,7 @@ document.querySelectorAll('input[name="tipo-giorno"]').forEach(radio => {
     el.bloccoFerie.classList.toggle('hidden', tipo !== 'ferie');
     el.bloccoMalattia.classList.toggle('hidden', tipo !== 'malattia');
     el.bloccoInfortunio.classList.toggle('hidden', tipo !== 'infortunio');
+    el.bloccoL104.classList.toggle('hidden', tipo !== 'l104');
     el.bloccoCorso.classList.toggle('hidden', tipo !== 'corso');
     el.bloccoPermessoUniversita.classList.toggle('hidden', tipo !== 'permesso_universita');
     el.bloccoAspettativa.classList.toggle('hidden', tipo !== 'aspettativa');
@@ -2480,10 +2472,6 @@ el.btnExportAttivita.addEventListener('click', eseguiConGestioneErrori(async () 
 }, 'Esporta PDF Attività'));
 
 el.btnAnagraficaAnnulla.addEventListener('click', chiudiAnagrafica);
-el.btnAggiungiCliente.addEventListener('click', () => {
-  stato.anagraficaClienti.push({ nome: '', sottoclienti: [{ codice: '', cantieri: [] }] });
-  renderAnagraficaClienti();
-});
 el.btnSalvaAnagrafica.addEventListener('click', salvaAnagraficaDaForm);
 
 el.btnGiornoFormAnnulla.addEventListener('click', chiudiGiornoForm);
@@ -3894,14 +3882,18 @@ const PRESENZE_TEMPLATE = {
 // (su richiesta esplicita: niente righe fisse stampate vuote). Le righe
 // "checkbox" disegnano una casella ☐ su TUTTI i 31 giorni (spuntata solo dove
 // vera), come nel modulo originale; le righe "numero" disegnano la cifra solo
-// dove presente, senza casella. "Ore L.104" non c'è ancora: verrà aggiunta
-// quando si costruirà il campo apposito nel form giornate.
+// dove presente, senza casella. "CORSO" e "SMART" non sono piu' selezionabili
+// per nuove giornate, ma restano qui per esportare correttamente eventuali
+// giornate storiche gia' salvate con quei tipi. "Ore L.104" (permesso a ore,
+// non giornata intera) non c'e' ancora: verra' aggiunta insieme al campo
+// apposito a livello di tappa.
 const RIGHE_PRESENZE_DEF = [
   { etichetta: 'PRESENTE', tipo: 'checkbox', valore: (g) => haLavoratoIlGiorno(g) },
   { etichetta: 'ORE PERMESSO', tipo: 'numero', valore: (g) => orePermessoGiorno(g) },
   { etichetta: 'FERIE', tipo: 'checkbox', valore: (g) => g.tipoGiorno === 'ferie' },
   { etichetta: 'MALATTIA', tipo: 'checkbox', valore: (g) => g.tipoGiorno === 'malattia' },
   { etichetta: 'INFORTUNIO', tipo: 'checkbox', valore: (g) => g.tipoGiorno === 'infortunio' },
+  { etichetta: 'L.104', tipo: 'checkbox', valore: (g) => g.tipoGiorno === 'l104' },
   { etichetta: 'PERMESSO RETRIB. UNIVERSITÀ', tipo: 'checkbox', valore: (g) => g.tipoGiorno === 'permesso_universita' },
   { etichetta: 'ASPETTATIVA NON RETRIBUITA', tipo: 'checkbox', valore: (g) => g.tipoGiorno === 'aspettativa' },
   { etichetta: 'CORSO', tipo: 'checkbox', valore: (g) => g.tipoGiorno === 'corso' }

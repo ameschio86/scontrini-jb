@@ -47,12 +47,15 @@
         <option value="Alberto Bellato">Alberto Bellato</option>
         <option value="Elisabetta Benà">Elisabetta Benà</option>
         <option value="Paolo Benà">Paolo Benà</option>
+        <option value="Beatrice Carrara">Beatrice Carrara</option>
         <option value="Patrizia Casotto">Patrizia Casotto</option>
         <option value="Mattia Cavestro">Mattia Cavestro</option>
         <option value="Andrea De Cecco">Andrea De Cecco</option>
         <option value="Antonino Ferrante">Antonino Ferrante</option>
         <option value="Tiziano Garbin">Tiziano Garbin</option>
+        <option value="Andrea Ghiglianovich">Andrea Ghiglianovich</option>
         <option value="Eddy Giacometti">Eddy Giacometti</option>
+        <option value="Edoardo Lovison">Edoardo Lovison</option>
         <option value="Sebastiano Lovison">Sebastiano Lovison</option>
         <option value="Alessandro Meschiari">Alessandro Meschiari</option>
         <option value="Michele Miotto">Michele Miotto</option>
@@ -94,7 +97,7 @@
       <button id="btn-dati-fatturazione" class="btn-backup-mini">🧾 Dati fatturazione</button>
     </div>
 
-    <span id="hub-versione" class="hub-versione">v2.0</span>
+    <span id="hub-versione" class="hub-versione">v2.2</span>
   </section>
 
   <!-- ===================== VISTA DATI FATTURAZIONE ===================== -->
@@ -264,7 +267,7 @@
     <button id="btn-close-month-attivita" class="btn-close-month">Chiudi mese</button>
 
     <div class="hub-backup">
-      <button id="btn-apri-anagrafica" class="btn-backup-mini">🗂 Anagrafica clienti/cantieri</button>
+      <button id="btn-apri-anagrafica" class="btn-backup-mini">⚙️ Impostazioni</button>
     </div>
   </section>
 
@@ -272,31 +275,39 @@
   <section id="view-attivita-anagrafica" class="view hidden">
     <header class="app-header">
       <button id="btn-anagrafica-annulla" class="btn-back" aria-label="Torna indietro">← <span class="btn-back-label">BACK</span></button>
-      <h1 class="app-title">Anagrafica</h1>
+      <h1 class="app-title">Impostazioni</h1>
     </header>
 
-    <label class="campo-label">
-      Sigla TC
+    <fieldset class="campo-fieldset campo-fieldset-verticale">
+      <legend>Sigla TC</legend>
       <input type="text" id="input-tc" maxlength="4">
-    </label>
+    </fieldset>
 
-    <div class="campo-riga-doppia">
-      <label class="campo-label">
-        Inizio giornata standard
-        <input type="time" id="input-orario-inizio">
-      </label>
-      <label class="campo-label">
-        Fine giornata standard
-        <input type="time" id="input-orario-fine">
-      </label>
-    </div>
+    <fieldset class="campo-fieldset campo-fieldset-verticale">
+      <legend>Orario giornata standard</legend>
+      <div class="campo-riga-doppia">
+        <label class="campo-label">
+          Inizio
+          <input type="time" id="input-orario-inizio">
+        </label>
+        <label class="campo-label">
+          Fine
+          <input type="time" id="input-orario-fine">
+        </label>
+      </div>
+    </fieldset>
     <p class="campo-nota">Usati per calcolare in automatico le percentuali nelle giornate con più clienti.</p>
 
-    <div id="lista-clienti-anagrafica" class="lista-clienti-anagrafica"></div>
+    <fieldset class="campo-fieldset">
+      <legend>Percentuale calcolata su</legend>
+      <label class="radio-label"><input type="radio" name="modalita-percentuale" value="cliente" checked> Cliente</label>
+      <label class="radio-label"><input type="radio" name="modalita-percentuale" value="cantiere"> Cantiere</label>
+    </fieldset>
+    <p class="campo-nota">Scegli "Cantiere" se lavori spesso più cantieri dello stesso cliente nella stessa giornata: cosi' la percentuale si divide per cantiere, non solo per cliente.</p>
 
-    <button type="button" id="btn-aggiungi-cliente" class="btn-secondary">+ Aggiungi cliente</button>
+    <p class="campo-nota">L'elenco clienti/cantieri è unico per tutti ed è aggiornato centralmente: se manca una commessa, segnalalo.</p>
 
-    <button type="button" id="btn-salva-anagrafica" class="btn-primary spesa-form-salva">Salva anagrafica</button>
+    <button type="button" id="btn-salva-anagrafica" class="btn-primary spesa-form-salva">Salva impostazioni</button>
   </section>
 
   <!-- ===================== VISTA NUOVA GIORNATA ===================== -->
@@ -320,10 +331,14 @@
         <label class="radio-label"><input type="radio" name="tipo-giorno" value="ferie"> Ferie</label>
         <label class="radio-label"><input type="radio" name="tipo-giorno" value="malattia"> Malattia</label>
         <label class="radio-label"><input type="radio" name="tipo-giorno" value="infortunio"> Infortunio</label>
-        <label class="radio-label"><input type="radio" name="tipo-giorno" value="smart"> Smart working</label>
-        <label class="radio-label"><input type="radio" name="tipo-giorno" value="corso"> Corso (apprendistato)</label>
+        <label class="radio-label"><input type="radio" name="tipo-giorno" value="l104"> L.104</label>
         <label class="radio-label"><input type="radio" name="tipo-giorno" value="permesso_universita"> Permesso retribuito Università</label>
         <label class="radio-label"><input type="radio" name="tipo-giorno" value="aspettativa"> Aspettativa non retribuita</label>
+        <!-- Smart working e Corso non sono piu' selezionabili per nuove giornate (rimossi su
+             richiesta), ma i radio restano nel DOM (nascosti) cosi' le giornate storiche gia'
+             salvate con questi tipi si aprono ancora correttamente in modifica. -->
+        <label class="radio-label hidden"><input type="radio" name="tipo-giorno" value="smart"> Smart working</label>
+        <label class="radio-label hidden"><input type="radio" name="tipo-giorno" value="corso"> Corso (apprendistato)</label>
       </fieldset>
 
       <div id="blocco-ferie" class="campo-label hidden">
@@ -332,13 +347,18 @@
       </div>
 
       <div id="blocco-malattia" class="campo-label hidden">
-        Codice certificato (opzionale)
+        Codice certificato
         <input type="text" id="input-malattia-note" placeholder="es. numero certificato">
       </div>
 
       <div id="blocco-infortunio" class="campo-label hidden">
+        Codice certificato
+        <input type="text" id="input-infortunio-note" placeholder="es. numero certificato">
+      </div>
+
+      <div id="blocco-l104" class="campo-label hidden">
         Note (opzionale)
-        <input type="text" id="input-infortunio-note">
+        <input type="text" id="input-l104-note">
       </div>
 
       <div id="blocco-corso" class="campo-label hidden">
