@@ -3472,6 +3472,26 @@ function allineaADestraInColonna(font, testo, dimensione, colonna, margineDestro
   return colonna[1] - margineDestro - larghezza;
 }
 
+function spezzaParolaLunga(font, parola, dimensione, larghezzaMax) {
+  // Una singola parola piu' larga della colonna (es. i nomi con underscore
+  // al posto degli spazi tipo "BRUSSI_ADRIASTRADE_ECOVIE") non si può andare
+  // a capo tra parole: va spezzata carattere per carattere, altrimenti
+  // sforerebbe sempre la colonna qualunque sia la larghezza disponibile.
+  const pezzi = [];
+  let pezzo = '';
+  for (const ch of parola) {
+    const prova = pezzo + ch;
+    if (font.widthOfTextAtSize(prova, dimensione) <= larghezzaMax || !pezzo) {
+      pezzo = prova;
+    } else {
+      pezzi.push(pezzo);
+      pezzo = ch;
+    }
+  }
+  if (pezzo) pezzi.push(pezzo);
+  return pezzi;
+}
+
 function suddividiTestoInRighe(font, testo, dimensione, larghezzaMax) {
   const parole = testo.split(/\s+/).filter(Boolean);
   const righe = [];
@@ -3479,11 +3499,17 @@ function suddividiTestoInRighe(font, testo, dimensione, larghezzaMax) {
 
   for (const parola of parole) {
     const prova = rigaCorrente ? `${rigaCorrente} ${parola}` : parola;
-    if (font.widthOfTextAtSize(prova, dimensione) <= larghezzaMax || !rigaCorrente) {
+    if (font.widthOfTextAtSize(prova, dimensione) <= larghezzaMax) {
       rigaCorrente = prova;
-    } else {
-      righe.push(rigaCorrente);
+      continue;
+    }
+    if (rigaCorrente) righe.push(rigaCorrente);
+    if (font.widthOfTextAtSize(parola, dimensione) <= larghezzaMax) {
       rigaCorrente = parola;
+    } else {
+      const pezzi = spezzaParolaLunga(font, parola, dimensione, larghezzaMax);
+      righe.push(...pezzi.slice(0, -1));
+      rigaCorrente = pezzi[pezzi.length - 1] || '';
     }
   }
   if (rigaCorrente) righe.push(rigaCorrente);
@@ -3751,6 +3777,48 @@ async function generaPdfAttivita(meseAnno) {
   const nero = rgb(0, 0, 0);
   const DIM = 8;
 
+  // Cliente/cantiere (elenco condiviso, vedi CANTIERI_ATTIVI) hanno spesso
+  // nomi troppo lunghi per stare su una riga sola nella colonna: quando non
+  // ci stanno vanno a capo, centrate in verticale sulla riga della tabella.
+  // Stesso carattere delle Note (DIM_CELLA) fino a 2 righe, con interlinea
+  // comoda — nessun nome reale dell'elenco condiviso ne serve 3. La riga
+  // della tabella e' alta ~20pt: misurato con le coordinate esatte del
+  // modulo che a 6pt non c'e' fisicamente spazio per 3 righe con
+  // un'interlinea leggibile, qualunque interlinea si scelga — solo nel raro
+  // caso limite in cui servano davvero si riduce anche il carattere
+  // (DIM_CELLA_RIDOTTA), cosi' restano comunque distanziate invece di
+  // schiacciate.
+  const DIM_CELLA = 6;
+  const DIM_CELLA_RIDOTTA = 4;
+  function disegnaTestoColonnaConWrap(page, testo, colonna, y, centrato) {
+    const larghezzaColonna = colonna[1] - colonna[0] - 6;
+    let dimensione = DIM_CELLA;
+    let righe = font.widthOfTextAtSize(testo, dimensione) <= larghezzaColonna
+      ? [testo]
+      : suddividiTestoInRighe(font, testo, dimensione, larghezzaColonna);
+    if (righe.length > 2) {
+      dimensione = DIM_CELLA_RIDOTTA;
+      righe = font.widthOfTextAtSize(testo, dimensione) <= larghezzaColonna
+        ? [testo]
+        : suddividiTestoInRighe(font, testo, dimensione, larghezzaColonna);
+    }
+    righe = righe.slice(0, 3);
+    const passo = righe.length >= 3 ? dimensione : dimensione + 1;
+    // "y" e' tarato per una riga sola (allineata a DATA/TC/PERCENTUALE): il
+    // centro vero della cella sta piu' in alto. Misurato con le coordinate
+    // esatte del modulo, separatamente per 2 e 3 righe (l'entita' dello
+    // spostamento dipende dalla dimensione carattere/interlinea usata) —
+    // applicato solo quando il blocco ha piu' di una riga, altrimenti il
+    // caso a riga singola (identico da sempre) non si sposta.
+    const correzioneCentro = righe.length === 3 ? 3.17 : righe.length === 2 ? 1.78 : 0;
+    const offsetCentratura = (righe.length - 1) * passo / 2 + correzioneCentro;
+    righe.forEach((riga, i) => {
+      const yRiga = y + offsetCentratura - i * passo;
+      const x = centrato ? centraTestoInColonna(font, riga, dimensione, colonna) : colonna[0] + 3;
+      page.drawText(riga, { x, y: yRiga, size: dimensione, font, color: nero });
+    });
+  }
+
   function scriviRiga(page, top, riga) {
     const c = ATTIVITA_TEMPLATE.colonne;
     const y = pdfLibY(top, DIM);
@@ -3762,12 +3830,12 @@ async function generaPdfAttivita(meseAnno) {
 
     const testoCliente = riga.cliente === CLIENTE_PERMESSO ? 'PERMESSO' : riga.cliente;
     if (testoCliente) {
-      page.drawText(testoCliente, { x: centraTestoInColonna(font, testoCliente, DIM, c.CLIENTE), y, size: DIM, font, color: nero });
+      disegnaTestoColonnaConWrap(page, testoCliente, c.CLIENTE, y, true);
     }
 
     const cantiereTesto = [riga.cantiere, riga.codice].filter(Boolean).join(' ');
     if (cantiereTesto) {
-      page.drawText(cantiereTesto, { x: c.CANTIERE[0] + 3, y, size: DIM, font, color: nero });
+      disegnaTestoColonnaConWrap(page, cantiereTesto, c.CANTIERE, y, false);
     }
 
     if (riga.percentuale !== null && riga.percentuale !== undefined) {
