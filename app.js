@@ -29,7 +29,7 @@ const CANTIERI_ATTIVI = [
   { codice: '240', cliente: 'ATI BRUSSI_ADRIASTRADE_ECOVIE', cantiere: "A4 TERZA CORSIA SAN DONA' - PORTOGRUARO" },
   { codice: '239', cliente: 'ATI BRUSSI_ECOVIE_ZARA', cantiere: 'AIPO - PISTA CICLABILE MANTOVA' },
   { codice: '238', cliente: 'ANESE SRL', cantiere: 'SAN GIULIANO - VENEZIA' },
-  { codice: '237', cliente: 'BRUSSI COSTRUZIONI SRL', cantiere: 'AUTAMAROCCHI VIA OLANDA PADOVA' },
+  { codice: 'P.244', cliente: 'BRENELLI', cantiere: 'PIAZZA DEL POPOLO PN' },
   { codice: '236', cliente: 'GHIAIE PONTE ROSSO', cantiere: 'ROTATORIA PERTEGADA' },
   { codice: '235', cliente: 'COMUNE DI S.MICHELE AL T.', cantiere: 'PISTA CICLABILE VIA BASELEGHE - BIBIONE' },
   { codice: '234', cliente: 'COMUNE DI S.MICHELE AL T.', cantiere: 'PISTA LIDO DEI PINI - BIBIONE' },
@@ -1256,7 +1256,12 @@ function renderListaGiorniAttivita(giorni, meseChiuso) {
   el.listaGiorniAttivita.innerHTML = '';
   el.listaGiorniAttivitaEmpty.classList.toggle('hidden', giorni.length > 0);
 
-  for (const g of giorni) {
+  // In elenco la piu' recente prima (piu' probabile da dover aggiornare):
+  // solo per la visualizzazione, l'ordine cronologico "vero" (usato da
+  // export ed elaborazioni) resta quello di getGiorniAttivitaDelMese.
+  const giorniOrdinati = [...giorni].reverse();
+
+  for (const g of giorniOrdinati) {
     const item = document.createElement('div');
     item.className = 'giorno-item';
 
@@ -2168,6 +2173,13 @@ function aggiungiTappaVuota() {
     inputCodice.value = '';
     if (selectCliente.value !== CLIENTE_PERMESSO) {
       popolaSelectCantieri(selectCliente.value, selectCantiere);
+      // Se il cliente ha un solo cantiere/codice possibile, lo si sceglie da
+      // solo: non ha senso far scegliere all'utente un'opzione obbligata.
+      const opzioniReali = [...selectCantiere.options].filter(o => o.value);
+      if (opzioniReali.length === 1) {
+        selectCantiere.value = opzioniReali[0].value;
+        inputCodice.value = opzioniReali[0].dataset.codice || '';
+      }
     } else {
       selectCantiere.innerHTML = '';
     }
