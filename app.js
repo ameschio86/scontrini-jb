@@ -1867,50 +1867,59 @@ async function elaboraScontrinoAI(canvas) {
   const canvasCompresso = comprimiImmagineACanvas(canvas);
   const blob = await canvasABlob(canvasCompresso);
 
-  // Al Worker per la lettura mandiamo una copia piu' leggera (vedi
-  // MAX_LATO_LUNGO_AI): la foto salvata sopra resta a piena risoluzione. Il
-  // riquadro restituito dall'IA e' nelle coordinate di QUESTA copia piu'
-  // piccola, quindi va riscalato prima di ritagliare canvasCompresso.
-  const canvasPerAI = comprimiImmagineACanvas(canvas, MAX_LATO_LUNGO_AI);
-  const blobPerAI = await canvasABlob(canvasPerAI, JPEG_QUALITY_AI);
-
+  // Primo tentativo a piena qualita' (la stessa foto che poi si salva): e'
+  // quella che legge meglio. Solo se fallisce si riprova UNA volta con una
+  // copia piu' leggera (vedi MAX_LATO_LUNGO_AI) — nei log di Cloudflare le
+  // foto piu' pesanti a volte tornavano un 502 dal binding Workers AI, ma
+  // mandare sempre la copia leggera peggiorava troppo la lettura nei casi
+  // normali. Il riquadro restituito dall'IA e' nelle coordinate della copia
+  // usata per la lettura: va riscalato su canvasCompresso solo se diversa.
+  let risultato;
+  let canvasUsatoPerLettura = canvasCompresso;
   try {
-    const risultato = await richiediLetturaScontrino(blobPerAI);
-
-    applicaDatiScontrinoAlForm(risultato);
-    impostaCategoriaSpesa(risultato.categoria);
-
-    if (risultato.riquadro) {
-      // L'IA ha isolato il/i scontrino/i dallo sfondo (dai blocchi di testo letti
-      // dall'OCR): ritaglio automatico, nessun tocco richiesto.
-      const scalaX = canvasCompresso.width / canvasPerAI.width;
-      const scalaY = canvasCompresso.height / canvasPerAI.height;
-      const riquadroScalato = {
-        x0: risultato.riquadro.x0 * scalaX,
-        y0: risultato.riquadro.y0 * scalaY,
-        x1: risultato.riquadro.x1 * scalaX,
-        y1: risultato.riquadro.y1 * scalaY
-      };
-      const canvasRitagliato = ritagliaCanvas(canvasCompresso, riquadroScalato);
-      const blobRitagliato = await canvasABlob(canvasRitagliato);
-      impostaFotoSpesa(blobRitagliato);
-      el.statoScattaRimborso.textContent = '✅ Fatto! Ho anche isolato lo scontrino dallo sfondo. Controlla i dati e la categoria, poi scegli fattura/scontrino e la modalità di pagamento prima di salvare.';
-      setTimeout(() => el.statoScattaRimborso.classList.add('hidden'), 7000);
-    } else {
-      // Non è stato possibile isolare un riquadro affidabile: i dati sono comunque
-      // letti, ma per la foto si passa al ritaglio manuale come rete di sicurezza.
+    risultato = await richiediLetturaScontrino(blob);
+  } catch (primoErrore) {
+    try {
+      canvasUsatoPerLettura = comprimiImmagineACanvas(canvas, MAX_LATO_LUNGO_AI);
+      const blobPerAI = await canvasABlob(canvasUsatoPerLettura, JPEG_QUALITY_AI);
+      risultato = await richiediLetturaScontrino(blobPerAI);
+    } catch (secondoErrore) {
+      // Lettura IA fallita anche al secondo tentativo: la foto resta comunque
+      // allegata, pronta per il ritaglio manuale, cosi' compilando a mano i
+      // dati non si perde lo scontrino scattato.
       impostaFotoSpesa(blob);
       stato.fotoGrezza = canvas;
-      el.statoScattaRimborso.textContent = '⚠ Ho letto i dati, ma non sono riuscito a isolare lo scontrino dallo sfondo: ritaglialo tu prima di salvare.';
+      el.statoScattaRimborso.textContent = `⚠ Non sono riuscito a leggere lo scontrino (${secondoErrore.message}). Ho comunque salvato la foto: ritagliala e completa i dati a mano prima di salvare.`;
       apriRifinisci();
+      return;
     }
-  } catch (err) {
-    // Lettura IA fallita (rete/servizio): la foto resta comunque allegata,
-    // pronta per il ritaglio manuale, cosi' compilando a mano i dati non si
-    // perde lo scontrino scattato.
+  }
+
+  applicaDatiScontrinoAlForm(risultato);
+  impostaCategoriaSpesa(risultato.categoria);
+
+  if (risultato.riquadro) {
+    // L'IA ha isolato il/i scontrino/i dallo sfondo (dai blocchi di testo letti
+    // dall'OCR): ritaglio automatico, nessun tocco richiesto.
+    const scalaX = canvasCompresso.width / canvasUsatoPerLettura.width;
+    const scalaY = canvasCompresso.height / canvasUsatoPerLettura.height;
+    const riquadroScalato = {
+      x0: risultato.riquadro.x0 * scalaX,
+      y0: risultato.riquadro.y0 * scalaY,
+      x1: risultato.riquadro.x1 * scalaX,
+      y1: risultato.riquadro.y1 * scalaY
+    };
+    const canvasRitagliato = ritagliaCanvas(canvasCompresso, riquadroScalato);
+    const blobRitagliato = await canvasABlob(canvasRitagliato);
+    impostaFotoSpesa(blobRitagliato);
+    el.statoScattaRimborso.textContent = '✅ Fatto! Ho anche isolato lo scontrino dallo sfondo. Controlla i dati e la categoria, poi scegli fattura/scontrino e la modalità di pagamento prima di salvare.';
+    setTimeout(() => el.statoScattaRimborso.classList.add('hidden'), 7000);
+  } else {
+    // Non è stato possibile isolare un riquadro affidabile: i dati sono comunque
+    // letti, ma per la foto si passa al ritaglio manuale come rete di sicurezza.
     impostaFotoSpesa(blob);
     stato.fotoGrezza = canvas;
-    el.statoScattaRimborso.textContent = `⚠ Non sono riuscito a leggere lo scontrino (${err.message}). Ho comunque salvato la foto: ritagliala e completa i dati a mano prima di salvare.`;
+    el.statoScattaRimborso.textContent = '⚠ Ho letto i dati, ma non sono riuscito a isolare lo scontrino dallo sfondo: ritaglialo tu prima di salvare.';
     apriRifinisci();
   }
 }
