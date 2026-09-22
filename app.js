@@ -17,6 +17,13 @@ const STORE_STATO_MESI_ATTIVITA = 'statoMesiAttivita';
 const CLIENTE_PERMESSO = '__PERMESSO__';
 const MAX_LATO_LUNGO = 2200;
 const JPEG_QUALITY = 0.85;
+// Copia più leggera mandata SOLO al Worker per la lettura AI (la foto
+// salvata/allegata resta alla risoluzione piena sopra): dai log di
+// Cloudflare, le chiamate con l'immagine a piena risoluzione (~700+ KB di
+// corpo JSON) tornavano 502 dal binding Workers AI in ~176ms — troppo
+// veloce per un vero tentativo di lettura, sembra un rifiuto per dimensione.
+const MAX_LATO_LUNGO_AI = 1400;
+const JPEG_QUALITY_AI = 0.7;
 
 // Elenco clienti/cantieri unico per tutti i dipendenti (commesse attive,
 // fornito dal titolare) — non più modificabile dal singolo dipendente
@@ -31,7 +38,8 @@ const CANTIERI_ATTIVI = [
   { codice: 'P239', cliente: 'BRUSSI', cantiere: '1282_AIPO MANTOVA' },
   { codice: 'P233', cliente: 'BRUSSI', cantiere: '1301_TRIESTE' },
   { codice: 'P240', cliente: 'BRUSSI', cantiere: '1308_3^CORSIA A4' },
-  { codice: 'P242', cliente: 'BRUSSI', cantiere: '1351_ANQUILLARA' },
+  { codice: 'P242', cliente: 'BRUSSI', cantiere: '1351_ANGUILLARA' },
+  { codice: '1230', cliente: 'BRUSSI', cantiere: 'TERRAGLIO EST' },
   { codice: 'P234', cliente: 'COMUNE S. MICHELE AL TAGL.', cantiere: 'LIDO DEI PINI' },
   { codice: 'P235', cliente: 'COMUNE S. MICHELE AL TAGL.', cantiere: 'PISTA CICLABILE VIA BASELEGHE - BIBIONE' },
   { codice: 'P229', cliente: 'GHIAIE PONTE ROSSO', cantiere: 'TRILIVE' },
@@ -733,10 +741,10 @@ function chiudiFotocamera() {
   el.viewCamera.classList.add('hidden');
 }
 
-function comprimiImmagineACanvas(sourceCanvas) {
+function comprimiImmagineACanvas(sourceCanvas, maxLato = MAX_LATO_LUNGO) {
   const { width, height } = sourceCanvas;
   const latoLungo = Math.max(width, height);
-  const scala = latoLungo > MAX_LATO_LUNGO ? MAX_LATO_LUNGO / latoLungo : 1;
+  const scala = latoLungo > maxLato ? maxLato / latoLungo : 1;
   const targetW = Math.round(width * scala);
   const targetH = Math.round(height * scala);
 
@@ -749,8 +757,8 @@ function comprimiImmagineACanvas(sourceCanvas) {
   return outCanvas;
 }
 
-function canvasABlob(canvas) {
-  return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', JPEG_QUALITY));
+function canvasABlob(canvas, qualita = JPEG_QUALITY) {
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', qualita));
 }
 
 function comprimiImmagine(sourceCanvas) {
@@ -1747,7 +1755,22 @@ async function richiediLetturaScontrino(blob) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ modalita: 'scontrino', immagine: immagineBase64 })
   });
-  if (!risposta.ok) throw new Error('il servizio non ha risposto correttamente');
+  if (!risposta.ok) {
+    // Include codice HTTP e corpo della risposta (se presente) nell'errore
+    // mostrato: prima si vedeva solo un messaggio fisso uguale per qualsiasi
+    // causa (rete, limite del servizio AI, errore del Worker...), impossibile
+    // da distinguere senza guardare i log del Worker su Cloudflare.
+    const corpo = await risposta.text().catch(() => '');
+    let dettaglio = '';
+    try {
+      const json = JSON.parse(corpo);
+      dettaglio = json.errore || json.message || corpo;
+    } catch {
+      dettaglio = corpo;
+    }
+    const suffisso = dettaglio ? `: ${dettaglio.slice(0, 200)}` : '';
+    throw new Error(`HTTP ${risposta.status}${suffisso}`);
+  }
   const risultato = await risposta.json();
   if (risultato.errore) throw new Error(risultato.errore);
   return risultato;
@@ -1837,10 +1860,22 @@ async function elaboraScontrinoAI(canvas) {
   el.statoScattaRimborso.classList.remove('hidden');
   el.statoScattaRimborso.textContent = 'Sto leggendo lo scontrino...';
 
+  // Foto pronta PRIMA di chiamare l'IA (operazioni locali, nessuna rete):
+  // cosi' la foto scattata resta comunque disponibile anche se la lettura
+  // IA fallisce, invece di andare persa — prima capitava che, fallendo la
+  // chiamata, non venisse salvata ne' la foto ne' i dati letti.
+  const canvasCompresso = comprimiImmagineACanvas(canvas);
+  const blob = await canvasABlob(canvasCompresso);
+
+  // Al Worker per la lettura mandiamo una copia piu' leggera (vedi
+  // MAX_LATO_LUNGO_AI): la foto salvata sopra resta a piena risoluzione. Il
+  // riquadro restituito dall'IA e' nelle coordinate di QUESTA copia piu'
+  // piccola, quindi va riscalato prima di ritagliare canvasCompresso.
+  const canvasPerAI = comprimiImmagineACanvas(canvas, MAX_LATO_LUNGO_AI);
+  const blobPerAI = await canvasABlob(canvasPerAI, JPEG_QUALITY_AI);
+
   try {
-    const canvasCompresso = comprimiImmagineACanvas(canvas);
-    const blob = await canvasABlob(canvasCompresso);
-    const risultato = await richiediLetturaScontrino(blob);
+    const risultato = await richiediLetturaScontrino(blobPerAI);
 
     applicaDatiScontrinoAlForm(risultato);
     impostaCategoriaSpesa(risultato.categoria);
@@ -1848,7 +1883,15 @@ async function elaboraScontrinoAI(canvas) {
     if (risultato.riquadro) {
       // L'IA ha isolato il/i scontrino/i dallo sfondo (dai blocchi di testo letti
       // dall'OCR): ritaglio automatico, nessun tocco richiesto.
-      const canvasRitagliato = ritagliaCanvas(canvasCompresso, risultato.riquadro);
+      const scalaX = canvasCompresso.width / canvasPerAI.width;
+      const scalaY = canvasCompresso.height / canvasPerAI.height;
+      const riquadroScalato = {
+        x0: risultato.riquadro.x0 * scalaX,
+        y0: risultato.riquadro.y0 * scalaY,
+        x1: risultato.riquadro.x1 * scalaX,
+        y1: risultato.riquadro.y1 * scalaY
+      };
+      const canvasRitagliato = ritagliaCanvas(canvasCompresso, riquadroScalato);
       const blobRitagliato = await canvasABlob(canvasRitagliato);
       impostaFotoSpesa(blobRitagliato);
       el.statoScattaRimborso.textContent = '✅ Fatto! Ho anche isolato lo scontrino dallo sfondo. Controlla i dati e la categoria, poi scegli fattura/scontrino e la modalità di pagamento prima di salvare.';
@@ -1862,7 +1905,13 @@ async function elaboraScontrinoAI(canvas) {
       apriRifinisci();
     }
   } catch (err) {
-    el.statoScattaRimborso.textContent = `⚠ Non sono riuscito a leggere lo scontrino (${err.message}). Compila a mano.`;
+    // Lettura IA fallita (rete/servizio): la foto resta comunque allegata,
+    // pronta per il ritaglio manuale, cosi' compilando a mano i dati non si
+    // perde lo scontrino scattato.
+    impostaFotoSpesa(blob);
+    stato.fotoGrezza = canvas;
+    el.statoScattaRimborso.textContent = `⚠ Non sono riuscito a leggere lo scontrino (${err.message}). Ho comunque salvato la foto: ritagliala e completa i dati a mano prima di salvare.`;
+    apriRifinisci();
   }
 }
 
