@@ -3825,12 +3825,6 @@ async function generaPdfAttivita(meseAnno) {
     for (const r of g.righe) righeFlat.push({ data: g.data, ...r });
   }
 
-  const capienzaTotale = ATTIVITA_TEMPLATE.righePerPagina * ATTIVITA_TEMPLATE.numPagine;
-  if (righeFlat.length > capienzaTotale) {
-    alert(`Questo mese ha ${righeFlat.length} righe, più delle ${capienzaTotale} disponibili sul modulo (${ATTIVITA_TEMPLATE.numPagine} pagine). Elimina o sposta qualche voce prima di esportare: la gestione di pagine aggiuntive non è ancora disponibile.`);
-    return;
-  }
-
   const anagrafica = await getAnagraficaAttivita(dipendente);
   const tc = (anagrafica.tc || '').toUpperCase();
 
@@ -3920,6 +3914,15 @@ async function generaPdfAttivita(meseAnno) {
   }
 
   const numPagineNecessarie = Math.max(1, Math.ceil(righeFlat.length / ATTIVITA_TEMPLATE.righePerPagina));
+
+  // Il modulo base ha 3 pagine identiche: se le righe del mese ne richiedono
+  // di piu', si aggiungono copie della prima (ancora vuota) fino a trascrivere
+  // tutto. Le copie si fanno PRIMA di scrivere qualunque testo. Se ne basta
+  // meno (anche una sola), quelle in piu' vengono tolte qui sotto.
+  for (let p = ATTIVITA_TEMPLATE.numPagine; p < numPagineNecessarie; p++) {
+    const [copia] = await doc.copyPages(doc, [0]);
+    doc.addPage(copia);
+  }
 
   for (let p = 0; p < numPagineNecessarie; p++) {
     const page = doc.getPage(p);
