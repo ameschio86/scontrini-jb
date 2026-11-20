@@ -30,23 +30,24 @@ const JPEG_QUALITY_AI = 0.7;
 // nell'anagrafica: per aggiungerne uno nuovo si aggiorna questa lista e si
 // pusha. "L&B Sede" non ha un codice commessa (non è una commessa vera).
 const CANTIERI_ATTIVI = [
-  { codice: 'P192', cliente: 'BRUSSI', cantiere: '1022_RSA MESTRE' },
-  { codice: 'P210', cliente: 'BRUSSI', cantiere: '1154_PORTO MARGHERA' },
-  { codice: 'P217', cliente: 'BRUSSI', cantiere: '1220_DESIUM' },
-  { codice: 'P220', cliente: 'BRUSSI', cantiere: '1236_BACINO LUSORE' },
-  { codice: 'P225', cliente: 'BRUSSI', cantiere: '1277_GEMMO_MARGHERA' },
-  { codice: 'P239', cliente: 'BRUSSI', cantiere: '1282_AIPO MANTOVA' },
-  { codice: 'P233', cliente: 'BRUSSI', cantiere: '1301_TRIESTE' },
-  { codice: 'P240', cliente: 'BRUSSI', cantiere: '1308_3^CORSIA A4' },
-  { codice: 'P242', cliente: 'BRUSSI', cantiere: '1351_ANGUILLARA' },
-  { codice: '1230', cliente: 'BRUSSI', cantiere: 'TERRAGLIO EST' },
+  { codice: 'P192', cliente: 'BRUSSI COSTRUZIONI', cantiere: '1022_RSA MESTRE' },
+  { codice: 'P210', cliente: 'BRUSSI COSTRUZIONI', cantiere: '1154_PORTO MARGHERA' },
+  { codice: 'P217', cliente: 'BRUSSI COSTRUZIONI', cantiere: '1220_DESIUM' },
+  { codice: 'P220', cliente: 'BRUSSI COSTRUZIONI', cantiere: '1236_BACINO LUSORE' },
+  { codice: 'P225', cliente: 'BRUSSI COSTRUZIONI', cantiere: '1277_GEMMO_MARGHERA' },
+  { codice: 'P239', cliente: 'BRUSSI COSTRUZIONI', cantiere: '1282_AIPO MANTOVA' },
+  { codice: 'P233', cliente: 'BRUSSI COSTRUZIONI', cantiere: '1301_TRIESTE' },
+  { codice: 'P240', cliente: 'BRUSSI COSTRUZIONI', cantiere: '1308_3^CORSIA A4' },
+  { codice: 'P242', cliente: 'BRUSSI COSTRUZIONI', cantiere: '1351_ANGUILLARA' },
+  { codice: '1230', cliente: 'BRUSSI COSTRUZIONI', cantiere: 'TERRAGLIO EST' },
+  { codice: '1394', cliente: 'BRUSSI COSTRUZIONI', cantiere: 'A4 SVINCOLO SAN STINO' },
   { codice: 'P234', cliente: 'COMUNE S. MICHELE AL TAGL.', cantiere: 'LIDO DEI PINI' },
   { codice: 'P235', cliente: 'COMUNE S. MICHELE AL TAGL.', cantiere: 'PISTA CICLABILE VIA BASELEGHE - BIBIONE' },
   { codice: 'P229', cliente: 'GHIAIE PONTE ROSSO', cantiere: 'TRILIVE' },
   { codice: 'P236', cliente: 'GHIAIE PONTE ROSSO', cantiere: 'PERTEGADA' },
   { codice: 'P241', cliente: 'AVIANESE ASFALTI', cantiere: 'SVINCOLO A4 - REDIPUGLIA' },
-  { codice: 'P243', cliente: 'CARLET', cantiere: 'DEPURATORE FERRARA' },
-  { codice: 'P244', cliente: 'BRENELLI', cantiere: 'PIAZZA DEL POPOLO PN' },
+  { codice: 'P243', cliente: 'CARLET COSTRUZIONI', cantiere: 'DEPURATORE FERRARA' },
+  { codice: 'P244', cliente: 'BRENELLI COSTRUZIONI', cantiere: 'PIAZZA DEL POPOLO PN' },
   // Anese e Padana Escavazioni Inerti restano intatti su richiesta esplicita.
   { codice: '238', cliente: 'ANESE SRL', cantiere: 'SAN GIULIANO - VENEZIA' },
   { codice: '227', cliente: 'ANESE SRL', cantiere: 'PORTO VIRO' },
@@ -57,6 +58,24 @@ const CANTIERI_ATTIVI = [
   { codice: '223', cliente: 'PADANA ESCAVAZIONI INERTI', cantiere: 'UFFICI PEI' },
   { codice: '', cliente: 'L&B Sede', cantiere: 'L&B Sede' }
 ];
+
+// Clienti il cui nome e' stato esteso: le giornate gia' salvate (anche quelle
+// scaricate dal server) contengono ancora il nome vecchio. Si traduce solo in
+// lettura, in memoria: i dati su disco non vengono mai riscritti. Cosi' un
+// giorno vecchio riaperto in modifica ritrova il cliente nell'elenco e il PDF
+// riporta il nome completo.
+const CLIENTI_RINOMINATI = {
+  'BRUSSI': 'BRUSSI COSTRUZIONI',
+  'CARLET': 'CARLET COSTRUZIONI',
+  'BRENELLI': 'BRENELLI COSTRUZIONI'
+};
+
+function aggiornaNomiClientiGiorno(giorno) {
+  for (const r of (giorno.righe || [])) {
+    if (r.cliente && CLIENTI_RINOMINATI[r.cliente]) r.cliente = CLIENTI_RINOMINATI[r.cliente];
+  }
+  return giorno;
+}
 
 // Trasforma l'elenco piatto sopra nella stessa forma {nome, sottoclienti:
 // [{codice, cantieri}]} già usata da tutto il resto del codice, cosi' non
@@ -366,13 +385,14 @@ async function getGiorniAttivitaDelMese(meseAnno, dipendente) {
   const result = await reqAsPromise(idx.getAll(meseAnno));
   return result
     .filter(g => g.dipendente === dipendente)
+    .map(aggiornaNomiClientiGiorno)
     .sort((a, b) => a.data.localeCompare(b.data) || a.id - b.id);
 }
 
 async function getTuttiIGiorniAttivita(dipendente) {
   const { store } = await txStore(STORE_ATTIVITA_GIORNI, 'readonly');
   const result = await reqAsPromise(store.getAll());
-  return result.filter(g => g.dipendente === dipendente);
+  return result.filter(g => g.dipendente === dipendente).map(aggiornaNomiClientiGiorno);
 }
 
 async function getStatoMeseAttivita(meseAnno) {
@@ -613,6 +633,8 @@ const el = {
   listaSpeseEmpty: document.getElementById('lista-spese-empty'),
   totaleCarta: document.getElementById('totale-carta'),
   totaleDipendente: document.getElementById('totale-dipendente'),
+  totaleConvenzione: document.getElementById('totale-convenzione'),
+  rigaTotaleConvenzione: document.getElementById('riga-totale-convenzione'),
   btnExportScontriniGenerico: document.getElementById('btn-export-scontrini-generico'),
   btnExportScontriniGasolio: document.getElementById('btn-export-scontrini-gasolio'),
   btnExportScontriniPersonale: document.getElementById('btn-export-scontrini-personale'),
@@ -2082,11 +2104,27 @@ function aggiornaOrariTappe() {
       inputPermessoInizio.value = '';
       inputPermessoFine.value = '';
 
-      const chiaveAttuale = chiaveBlocco({ cliente: clienteAttuale, cantiere: cantiereAttuale }, modalita);
-      const chiavePrecedente = divPrecedente ? chiaveBlocco({ cliente: clientePrecedente, cantiere: cantierePrecedente }, modalita) : null;
-      const eSwitch = i > 0 && !precedenteEPermesso && clienteAttuale && clientePrecedente && chiaveAttuale !== chiavePrecedente;
-      labelOrario.classList.toggle('hidden', !eSwitch);
-      if (!eSwitch) inputOrario.value = '';
+      // Il campo orario resta SEMPRE visibile dalla seconda tappa in poi
+      // (prima appariva/spariva a seconda di cliente e cantiere e a volte non
+      // compariva): cambia solo se e' obbligatorio o facoltativo. La prima
+      // tappa e quella dopo un permesso non lo mostrano perche' il loro
+      // inizio e' gia' determinato (orario standard / fine permesso).
+      const mostraOrario = i > 0 && !precedenteEPermesso;
+      labelOrario.classList.toggle('hidden', !mostraOrario);
+      if (!mostraOrario) {
+        inputOrario.value = '';
+        inputOrario.classList.remove('campo-errore');
+      } else {
+        const chiaveAttuale = chiaveBlocco({ cliente: clienteAttuale, cantiere: cantiereAttuale }, modalita);
+        const chiavePrecedente = chiaveBlocco({ cliente: clientePrecedente, cantiere: cantierePrecedente }, modalita);
+        const obbligatorio = !!(clienteAttuale && clientePrecedente && chiaveAttuale !== chiavePrecedente);
+        const motivo = modalita === 'cantiere' ? 'cambia cliente o cantiere' : 'cambia cliente';
+        labelOrario.querySelector('.tappa-orario-testo').textContent = obbligatorio
+          ? `Orario di inizio tappa (obbligatorio: ${motivo})`
+          : 'Orario di inizio tappa (facoltativo)';
+        labelOrario.dataset.obbligatorio = obbligatorio ? '1' : '';
+        if (!obbligatorio) inputOrario.classList.remove('campo-errore');
+      }
     }
   });
 }
@@ -2151,12 +2189,17 @@ function aggiungiTappaVuota() {
 
   const labelOrarioSwitch = document.createElement('label');
   labelOrarioSwitch.className = 'campo-label tappa-orario-label hidden';
-  labelOrarioSwitch.append('Orario switch (cambio cliente)');
+  const testoOrarioSwitch = document.createElement('span');
+  testoOrarioSwitch.className = 'tappa-orario-testo';
+  testoOrarioSwitch.textContent = 'Orario di inizio tappa (facoltativo)';
+  labelOrarioSwitch.appendChild(testoOrarioSwitch);
   const inputOrarioSwitch = document.createElement('input');
   inputOrarioSwitch.type = 'time';
   inputOrarioSwitch.className = 'tappa-orario-switch';
+  inputOrarioSwitch.addEventListener('input', () => inputOrarioSwitch.classList.remove('campo-errore'));
   labelOrarioSwitch.appendChild(inputOrarioSwitch);
-  div.appendChild(labelOrarioSwitch);
+  // Il riquadro viene aggiunto piu' sotto, dopo cantiere e codice: l'obbligo
+  // dipende anche dal cantiere scelto, quindi va compilato per ultimo.
 
   const bloccoPermessoOrari = document.createElement('div');
   bloccoPermessoOrari.className = 'campo-riga-doppia tappa-permesso-orari hidden';
@@ -2200,6 +2243,8 @@ function aggiungiTappaVuota() {
   labelCodice.appendChild(inputCodice);
   div.appendChild(labelCodice);
 
+  div.appendChild(labelOrarioSwitch);
+
   const labelNote = document.createElement('label');
   labelNote.className = 'campo-label';
   labelNote.append('Note');
@@ -2241,6 +2286,9 @@ function aggiungiTappaVuota() {
   selectCantiere.addEventListener('change', () => {
     const opt = selectCantiere.selectedOptions[0];
     inputCodice.value = opt ? (opt.dataset.codice || '') : '';
+    // Il cambio cantiere puo' rendere obbligatorio l'orario di inizio: va
+    // rivalutato qui, non solo al cambio cliente.
+    aggiornaOrariTappe();
   });
 
   el.listaTappe.appendChild(div);
@@ -2453,6 +2501,25 @@ async function salvaFormGiorno(e) {
     }
 
     const modalitaPercentuale = stato.anagraficaCorrente.modalitaPercentuale || 'cliente';
+
+    // Se una tappa cambia cliente/cantiere rispetto alla precedente (secondo
+    // la stessa chiave usata per le percentuali) l'orario di inizio e'
+    // obbligatorio; se resta lo stesso e' facoltativo.
+    pulisciEvidenziazioneForm(el.formGiorno);
+    const tappeSenzaOrario = [];
+    righe.forEach((r, i) => {
+      if (i === 0 || r.cliente === CLIENTE_PERMESSO || righe[i - 1].cliente === CLIENTE_PERMESSO) return;
+      const cambia = chiaveBlocco(r, modalitaPercentuale) !== chiaveBlocco(righe[i - 1], modalitaPercentuale);
+      if (cambia && !r.orarioSwitch) tappeSenzaOrario.push(i);
+    });
+    if (tappeSenzaOrario.length > 0) {
+      const campi = tappeSenzaOrario.map(i => blocchi[i].querySelector('.tappa-orario-switch'));
+      campi.forEach(c => c.classList.add('campo-errore'));
+      campi[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const numeri = tappeSenzaOrario.map(i => i + 1).join(', ');
+      alert(`Indica l'orario di inizio della tappa ${numeri}: è obbligatorio quando cambia ${modalitaPercentuale === 'cantiere' ? 'cliente o cantiere' : 'cliente'}.`);
+      return;
+    }
     const blocchiCliente = raggruppaInBlocchi(righe, modalitaPercentuale);
     if (blocchiCliente.length === 1) {
       righe[righe.length - 1].percentuale = 100;
@@ -2462,7 +2529,7 @@ async function salvaFormGiorno(e) {
       if (percentualiRisolte) {
         unisciPercentualiRipetuti(blocchiCliente);
       } else {
-        alert('Non riesco a calcolare le percentuali: controlla di aver indicato l\'orario di switch per ogni cambio cliente, in ordine crescente e compreso nell\'orario di lavoro standard. Salvo comunque la giornata, ma dovrai completare le percentuali in seguito.');
+        alert('Non riesco a calcolare le percentuali: controlla gli orari di inizio tappa: devono essere in ordine crescente e compresi nell\'orario di lavoro standard. Salvo comunque la giornata, ma dovrai completare le percentuali in seguito.');
       }
     }
   }
@@ -3251,6 +3318,20 @@ function formatoImporto(numero) {
   return `${(numero || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
 }
 
+// Totali del rimborso, uguali per schermata e PDF: la convenzione la paga
+// l'azienda direttamente, quindi NON e' mai una cifra da rimborsare al
+// dipendente (va solo in un totale a parte); in "oggetto di rimborso" entra
+// solo cio' che il dipendente ha pagato di tasca propria.
+function calcolaTotaliRimborso(spese) {
+  const totali = { carta: 0, dipendente: 0, convenzione: 0 };
+  for (const s of spese) {
+    if (s.pagamento === 'carta_aziendale') totali.carta += s.importo;
+    else if (s.pagamento === 'convenzione') totali.convenzione += s.importo;
+    else totali.dipendente += s.importo;
+  }
+  return totali;
+}
+
 function etichettaPagamento(pagamento) {
   if (pagamento === 'carta_aziendale') return 'Carta aziendale';
   if (pagamento === 'pagato_dipendente') return 'Pagato dal dipendente';
@@ -3287,13 +3368,13 @@ async function aggiornaRimborso() {
   el.btnAddSpesa.disabled = chiuso;
   el.btnReopenMonthRimborso.classList.toggle('hidden', !chiuso);
 
-  let totaleCarta = 0, totaleOggettoRimborso = 0;
-  for (const s of spese) {
-    if (s.pagamento === 'carta_aziendale') totaleCarta += s.importo;
-    else totaleOggettoRimborso += s.importo;
-  }
-  el.totaleCarta.textContent = formatoImporto(totaleCarta);
-  el.totaleDipendente.textContent = formatoImporto(totaleOggettoRimborso);
+  const totali = calcolaTotaliRimborso(spese);
+  el.totaleCarta.textContent = formatoImporto(totali.carta);
+  el.totaleDipendente.textContent = formatoImporto(totali.dipendente);
+  el.totaleConvenzione.textContent = formatoImporto(totali.convenzione);
+  // La riga compare solo se ci sono spese in convenzione: senza, il
+  // riepilogo resta identico a prima.
+  el.rigaTotaleConvenzione.classList.toggle('hidden', totali.convenzione === 0);
 
   renderListaSpese(spese, chiuso);
   await aggiornaStatoFirma();
@@ -3717,11 +3798,9 @@ async function costruisciPdfRimborso(spese, meseAnno, dipendenteAttivo) {
     cursore += capienzaP2;
   });
 
-  let totaleCarta = 0, totaleOggettoRimborso = 0;
-  for (const s of spese) {
-    if (s.pagamento === 'carta_aziendale') totaleCarta += s.importo;
-    else totaleOggettoRimborso += s.importo;
-  }
+  const totali = calcolaTotaliRimborso(spese);
+  const totaleCarta = totali.carta;
+  const totaleOggettoRimborso = totali.dipendente;
 
   const testoTotCarta = formatoImporto(totaleCarta);
   paginaFinale.drawText(testoTotCarta, {
@@ -3734,6 +3813,19 @@ async function costruisciPdfRimborso(spese, meseAnno, dipendenteAttivo) {
     x: allineaADestraInColonna(font, testoTotOggetto, DIM, RIMBORSO_TEMPLATE.colonne.IMPORTO_DIPENDENTE),
     y: pdfLibY(RIMBORSO_TEMPLATE.totali.totOggettoRimborso.top), size: DIM, font, color: nero
   });
+
+  // Il modulo non ha una casella per la convenzione: solo se ce ne sono, la si
+  // riporta come scritta semplice nello spazio libero a destra dei totali
+  // (casella scura finisce a x=634,7), chiarendo che non e' da rimborsare.
+  if (totali.convenzione > 0) {
+    const xConv = 650;
+    paginaFinale.drawText(`TOT CONVENZIONE: ${formatoImporto(totali.convenzione)}`, {
+      x: xConv, y: pdfLibY(RIMBORSO_TEMPLATE.totali.totCarta.top), size: DIM, font: fontBold, color: nero
+    });
+    paginaFinale.drawText("(pagata dall'azienda, non rimborsata)", {
+      x: xConv, y: pdfLibY(RIMBORSO_TEMPLATE.totali.totOggettoRimborso.top) + 1, size: 6, font, color: nero
+    });
+  }
 
   if (cognomeNome) {
     paginaFinale.drawText(cognomeNome, {

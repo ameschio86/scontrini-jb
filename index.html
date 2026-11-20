@@ -61,6 +61,7 @@
         <option value="Michele Miotto">Michele Miotto</option>
         <option value="Giorgia Mori">Giorgia Mori</option>
         <option value="Marco Andrea Tonello">Marco Andrea Tonello</option>
+        <option value="Mattia Torresan">Mattia Torresan</option>
         <option value="Simone Vianello">Simone Vianello</option>
       </select>
     </div>
@@ -97,7 +98,7 @@
       <button id="btn-dati-fatturazione" class="btn-backup-mini">🧾 Dati fatturazione</button>
     </div>
 
-    <span id="hub-versione" class="hub-versione">v2.9</span>
+    <span id="hub-versione" class="hub-versione">v2.9.1</span>
   </section>
 
   <!-- ===================== VISTA DATI FATTURAZIONE ===================== -->
@@ -152,6 +153,10 @@
       <div class="rimborso-totale-riga">
         <span>Oggetto di rimborso</span>
         <strong id="totale-dipendente">0,00 €</strong>
+      </div>
+      <div class="rimborso-totale-riga hidden" id="riga-totale-convenzione">
+        <span>Convenzione (pagata dall'azienda)</span>
+        <strong id="totale-convenzione">0,00 €</strong>
       </div>
     </div>
 
@@ -393,7 +398,7 @@
         <button type="button" id="btn-aggiungi-tappa" class="btn-secondary">+ Aggiungi tappa</button>
       </div>
 
-      <p id="avviso-multi-cliente" class="firma-stato-mini hidden">⚠ Giorno multi-cliente: indica l'orario di switch su ogni tappa che cambia cliente, altrimenti la percentuale non verrà calcolata automaticamente.</p>
+      <p id="avviso-multi-cliente" class="firma-stato-mini hidden">⚠ Giorno multi-cliente: indica l'orario di inizio su ogni tappa che cambia cliente, altrimenti la percentuale non verrà calcolata automaticamente.</p>
 
       <button type="submit" id="btn-salva-giorno" class="btn-primary spesa-form-salva">Salva giornata</button>
     </form>
